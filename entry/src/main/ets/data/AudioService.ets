@@ -128,6 +128,19 @@ export class AudioService {
     const secs = Math.max(1, Math.round((Date.now() - AudioService.recordStartAt) / 1000));
     AudioService.recordStartAt = 0;
     AudioService.currentPath = '';
+
+    // 0 字节的录音等于没录。留着它会让界面显示一个点了没声音的块，
+    // 用户以为已经录上了 —— 直接删掉并回空，调用方据此提示「这次没录到声音」。
+    let size = 0;
+    try {
+      size = fs.statSync(path).size;
+    } catch (e) {
+      size = 0;
+    }
+    if (size <= 0) {
+      MediaRepo.removeQuietly(path);
+      return { path: '', duration: 0 };
+    }
     return { path: path, duration: secs };
   }
 

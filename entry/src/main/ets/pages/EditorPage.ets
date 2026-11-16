@@ -3,7 +3,7 @@ import { BlockType, Capsule, ContentBlock } from '../model/Capsule';
 import { TimeUtil } from '../common/TimeUtil';
 import { NavBar, PrimaryButton } from '../view/CommonViews';
 import { MediaRepo } from '../data/MediaRepo';
-import { AudioService } from '../data/AudioService';
+import { AudioService, RecordResult } from '../data/AudioService';
 import { PermService } from '../data/PermService';
 
 /**
@@ -28,16 +28,16 @@ export struct EditorPage {
   @State recordSecs: number = 0;
   /** 正在播放的块 id，空串表示没在播 */
   @State playingId: string = '';
-  /**
-   * 正在录音的块 id。
-   * 之前点「+ 语音」每次都用 `blk_${Date.now()}` 现场生成 id，
-   * 于是「开始」和「停止」两次点击拿到的是两个不同的 id，
-   * 停下来的音频被写进一个不存在的块，界面上就像按了没反应。
-   * 一次录音期间必须复用同一个 id。
-   */
-  @State audioBlockId: string = '';
-  /** 录音失败/权限被拒时的提示，空串表示没有 */
-  @State recordHint: string = '';
+  /** 录音框是否显示 */
+  @State showRecSheet: boolean = false;
+  /** 录音框里已经录好的文件路径，空串表示还没录 */
+  @State recSheetPath: string = '';
+  /** 录音框里录好的时长（秒） */
+  @State recSheetSecs: number = 0;
+  /** 录音框里的提示（权限被拒、设备没有麦克风等） */
+  @State recSheetError: string = '';
+  /** 录音框要改写哪个已有的块；空串表示录完追加成新块 */
+  @State recSheetEditId: string = '';
   onCancel: () => void = () => {};
   /**
    * 点取消时，如果已经写了东西，交给外层存成草稿。
@@ -66,6 +66,19 @@ export struct EditorPage {
     if (this.timer >= 0) {
       clearInterval(this.timer);
       this.timer = -1;
+    }
+    // 页面被销毁时录音可能还开着：停掉并把没人接手的那一段删掉，
+    // 否则沙箱里会留一堆孤儿音频
+    if (this.recording) {
+      const pending = this.recSheetPath;
+      AudioService.stop().then((r: RecordResult) => {
+        if (pending.length > 0) {
+          MediaRepo.removeQuietly(pending);
+        }
+        if (r.path.length > 0) {
+          MediaRepo.removeQuietly(r.path);
+        }
+      });
     }
     AudioService.stopPlay();
   }
@@ -178,56 +191,114 @@ export struct EditorPage {
     }
   }
 
-  /** 语音块：点一次开始录，再点一次停止 */
-  private async toggleRecord(blockId: string): Promise<void> {
-    if (this.recording) {
-      // 停止时一律用 audioBlockId，不信调用方传来的 id
-      const target = this.audioBlockId;
-      const result = await AudioService.stop();
-      this.stopTimer();
-      this.recording = false;
-      this.recordSecs = 0;
-      this.audioBlockId = '';
-      if (result.path.length === 0 || target.length === 0) {
-        this.recordHint = '这次没录到声音，再试一次';
-        return;
-      }
-      this.patchBlock(target, (b: ContentBlock) => {
-        b.audioUri = result.path;
-        b.duration = result.duration;
-      });
-      this.recordHint = '';
+  // ---------------- 录音框 ----------------
+
+  /** 打开录音框：editId 非空表示重录已有的块，否则是新的一块 */
+  private openRecorder(editId: string): void {
+    // 录音框已经开着（正在录）就不重入，否则 start/stop 会打架
+    if (this.showRecSheet && this.recording) {
       return;
+    }
+    this.recSheetEditId = editId;
+    this.recSheetPath = '';
+    this.recSheetSecs = 0;
+    this.recSheetError = '';
+    this.recordSecs = 0;
+    this.showRecSheet = true;
+  }
+
+  private async closeRecorder(): Promise<void> {
+    // 必须 await：stopRecord 是异步的，不等待的话 recSheetPath 还没填上就开始删，
+    // 结果文件留在沙箱里没人清（取消录音后文件残留就是这么来的）。
+    if (this.recording) {
+      await this.stopRecord();
+    }
+    // 关掉时把没确认的录音文件删掉，避免沙箱里攒一堆废弃音频
+    if (this.recSheetPath.length > 0) {
+      MediaRepo.removeQuietly(this.recSheetPath);
+    }
+    this.recSheetPath = '';
+    this.recSheetSecs = 0;
+    this.recSheetError = '';
+    this.recSheetEditId = '';
+    this.showRecSheet = false;
+  }
+
+  /** 录音框里的圆钮：点一次开始，再点一次结束 */
+  private async toggleSheetRecord(): Promise<void> {
+    if (this.recording) {
+      this.stopRecord();
+      return;
+    }
+    // 已经有录好的文件时，再点就是重录 —— 先清掉旧的
+    if (this.recSheetPath.length > 0) {
+      MediaRepo.removeQuietly(this.recSheetPath);
+      this.recSheetPath = '';
+      this.recSheetSecs = 0;
     }
     const granted = await PermService.ensureMicrophone();
     if (!granted) {
-      this.recordHint = '没有麦克风权限，去设置里打开后再试';
+      this.recSheetError = '没有麦克风权限，去设置里打开后再试';
       return;
     }
-    const target = blockId.length > 0 ? blockId : `blk_${Date.now()}_${this.blocks.length}`;
-    // 语音块先占位进列表，录完再写 uri
-    if (this.blocks.findIndex((b: ContentBlock) => b.id === target) < 0) {
+    try {
+      await AudioService.start();
+      this.recording = true;
+      this.recordSecs = 0;
+      this.recSheetError = '';
+      this.startTimer();
+    } catch (e) {
+      this.recording = false;
+      this.recSheetError = '这台设备没能打开麦克风，录音不可用';
+    }
+  }
+
+  /** 结束录音，把结果放进录音框（此时还没提交到内容块） */
+  private async stopRecord(): Promise<void> {
+    const result = await AudioService.stop();
+    this.stopTimer();
+    this.recording = false;
+    this.recordSecs = 0;
+    if (result.path.length === 0) {
+      this.recSheetError = '这次没录到声音，再试一次';
+      return;
+    }
+    this.recSheetPath = result.path;
+    this.recSheetSecs = result.duration;
+    this.recSheetError = '';
+  }
+
+  /** 确认使用这段录音：重录则改已有块，否则追加新块 */
+  private confirmRecording(): void {
+    if (this.recSheetPath.length === 0) {
+      return;
+    }
+    const path = this.recSheetPath;
+    const secs = this.recSheetSecs;
+    if (this.recSheetEditId.length > 0) {
+      this.patchBlock(this.recSheetEditId, (b: ContentBlock) => {
+        // 换掉旧文件，别在沙箱里留垃圾
+        if (b.audioUri !== undefined && b.audioUri.length > 0 && b.audioUri !== path) {
+          MediaRepo.removeQuietly(b.audioUri);
+        }
+        b.audioUri = path;
+        b.duration = secs;
+      });
+    } else {
       const block: ContentBlock = {
-        id: target,
+        id: `blk_${Date.now()}_${this.blocks.length}`,
         type: BlockType.Audio,
+        audioUri: path,
+        duration: secs,
         order: this.blocks.length
       };
       this.commit(this.blocks.concat([block]));
     }
-    try {
-      await AudioService.start();
-      this.audioBlockId = target;
-      this.recording = true;
-      this.recordSecs = 0;
-      this.recordHint = '';
-      this.startTimer();
-    } catch (e) {
-      // 以前这里把异常吞掉，用户只看到「按了没反应」。
-      // 模拟器没有音频输入设备时 prepare 就会失败，必须说清楚。
-      this.recording = false;
-      this.audioBlockId = '';
-      this.recordHint = '这台设备没能打开麦克风，录音不可用';
-    }
+    // 文件已经被内容块接手，不能再让 closeRecorder 删掉
+    this.recSheetPath = '';
+    this.recSheetSecs = 0;
+    this.recSheetEditId = '';
+    this.showRecSheet = false;
   }
 
   private startTimer(): void {
@@ -275,113 +346,231 @@ export struct EditorPage {
   }
 
   build() {
-    Column() {
-      NavBar({
-        title: '约定时间',
-        leftText: '取消',
-        rightText: '封存',
-        rightEnabled: this.canSeal(),
-        onLeft: () => this.leave(),
-        onRight: () => this.onRequestSeal(this.title, this.blocks, this.draft.openAt)
-      })
-
-      Scroll() {
-        Column() {
-          // 标题输入
-          TextInput({ text: this.title, placeholder: '给这一刻起个名字' })
-            .fontSize(22)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(Color.ink)
-            .placeholderColor(Color.muted2)
-            .backgroundColor('#00000000')
-            .padding(0)
-            .height(56)
-            .width('100%')
-            .onChange((v: string) => {
-              this.title = v;
-              this.draft.title = v;
-            })
-
-          Divider().color(Color.line).strokeWidth(1)
-
-          // 开启时间（可点，右对齐绿色加粗 + chevron）
-          Row() {
-            Text('开启时间')
-              .fontSize(Font.body)
-              .fontColor(Color.ink2)
-            Blank()
-            Text(TimeUtil.format(this.draft.openAt))
-              .fontSize(Font.body)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(Color.green)
-            Text('›')
-              .fontSize(18)
-              .fontColor(Color.muted2)
-              .margin({ left: 4 })
-          }
-          .width('100%')
-          .height(52)
-          .onClick(() => this.pickOpenAt())
-
-          // 创建时间（只读）
-          Row() {
-            Text('创建时间')
-              .fontSize(Font.body)
-              .fontColor(Color.ink2)
-            Blank()
-            Text(TimeUtil.format(this.draft.createdAt))
-              .fontSize(Font.caption)
-              .fontColor(Color.muted2)
-          }
-          .width('100%')
-          .height(48)
-
-          Divider().color(Color.line).strokeWidth(1).margin({ top: 4, bottom: 16 })
-
-          // 内容块
-          ForEach(this.blocks, (block: ContentBlock) => {
-            this.blockView(block)
-          }, (block: ContentBlock) => block.id)
-
-          // 添加按钮组
-          Row() {
-            this.addButton('+ 文字', () => this.addText())
-            this.addButton('+ 图片', () => { this.addImages(); })
-            // 录音中同一个按钮变「停止录音」，并复用 audioBlockId
-            this.addButton(this.recording ? '■ 停止录音' : '+ 语音', () => {
-              this.toggleRecord(this.recording ? this.audioBlockId : `blk_${Date.now()}_${this.blocks.length}`);
-            })
-          }
-          .width('100%')
-          .margin({ top: 8, bottom: this.recordHint.length > 0 ? 6 : 24 })
-
-          if (this.recordHint.length > 0) {
-            Text(this.recordHint)
-              .fontSize(Font.caption)
-              .fontColor(Color.warmInk)
-              .width('100%')
-              .margin({ bottom: 24 })
-          }
-        }
-        .alignItems(HorizontalAlign.Start)
-        .padding({ left: Size.pageH, right: Size.pageH, top: 8 })
-      }
-      .layoutWeight(1)
-      .align(Alignment.Top)
-      .scrollBar(BarState.Off)
-
+    Stack() {
       Column() {
-        PrimaryButton({
-          label: '封存胶囊',
-          isEnabled: this.canSeal(),
-          onTap: () => this.onRequestSeal(this.title, this.blocks, this.draft.openAt)
+        NavBar({
+          title: '约定时间',
+          leftText: '取消',
+          rightText: '封存',
+          rightEnabled: this.canSeal(),
+          onLeft: () => this.leave(),
+          onRight: () => this.onRequestSeal(this.title, this.blocks, this.draft.openAt)
         })
+
+        Scroll() {
+          Column() {
+            // 标题输入
+            TextInput({ text: this.title, placeholder: '给这一刻起个名字' })
+              .fontSize(22)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(Color.ink)
+              .placeholderColor(Color.muted2)
+              .backgroundColor('#00000000')
+              .padding(0)
+              .height(56)
+              .width('100%')
+              .onChange((v: string) => {
+                this.title = v;
+                this.draft.title = v;
+              })
+
+            Divider().color(Color.line).strokeWidth(1)
+
+            // 开启时间（可点，右对齐绿色加粗 + chevron）
+            Row() {
+              Text('开启时间')
+                .fontSize(Font.body)
+                .fontColor(Color.ink2)
+              Blank()
+              Text(TimeUtil.format(this.draft.openAt))
+                .fontSize(Font.body)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(Color.green)
+              Text('›')
+                .fontSize(18)
+                .fontColor(Color.muted2)
+                .margin({ left: 4 })
+            }
+            .width('100%')
+            .height(52)
+            .onClick(() => this.pickOpenAt())
+
+            // 创建时间（只读）
+            Row() {
+              Text('创建时间')
+                .fontSize(Font.body)
+                .fontColor(Color.ink2)
+              Blank()
+              Text(TimeUtil.format(this.draft.createdAt))
+                .fontSize(Font.caption)
+                .fontColor(Color.muted2)
+            }
+            .width('100%')
+            .height(48)
+
+            Divider().color(Color.line).strokeWidth(1).margin({ top: 4, bottom: 16 })
+
+            // 内容块
+            // key 里带上 duration：重录会用同一个 block.id 换掉音频，
+            // 只按 id 做 key 的话 ArkUI 会复用旧组件不重建，
+            // 界面上时长就一直停在录音入前的旧值。
+            // 文字 / 图片块的 duration 恒为 undefined → 0，key 保持稳定，
+            // 输入文字时不会被打断。
+            ForEach(this.blocks, (block: ContentBlock) => {
+              this.blockView(block)
+            }, (block: ContentBlock) => `${block.id}_${block.duration === undefined ? 0 : block.duration}`)
+
+            // 添加按钮组。语音不再原地开录，而是先弹录音框
+            Row() {
+              this.addButton('+ 文字', () => this.addText())
+              this.addButton('+ 图片', () => { this.addImages(); })
+              this.addButton('+ 语音', () => this.openRecorder(''))
+            }
+            .width('100%')
+            .margin({ top: 8, bottom: 24 })
+          }
+          .alignItems(HorizontalAlign.Start)
+          .padding({ left: Size.pageH, right: Size.pageH, top: 8 })
+        }
+        .layoutWeight(1)
+        .align(Alignment.Top)
+        .scrollBar(BarState.Off)
+
+        Column() {
+          PrimaryButton({
+            label: '封存胶囊',
+            isEnabled: this.canSeal(),
+            onTap: () => this.onRequestSeal(this.title, this.blocks, this.draft.openAt)
+          })
+        }
+        .padding({ left: Size.pageH, right: Size.pageH, bottom: 28 })
       }
-      .padding({ left: Size.pageH, right: Size.pageH, bottom: 28 })
+      .width('100%')
+      .height('100%')
+      .backgroundColor(Color.bg)
+
+      // 录音框：盖在编辑器上方，遮罩吃掉点击
+      if (this.showRecSheet) {
+        this.recordSheet()
+      }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(Color.bg)
+  }
+
+  /**
+   * 录音框（底部弹层）。
+   *
+   * 为什么不直接用 bindSheet：这个页面本身是 NavDestination 压栈打开的，
+   * bindSheet 挂在 Navigation 上会被 NavDestination 盖住（封存弹层踩过同样的坑），
+   * 所以这里用 Stack + 手写遮罩。
+   */
+  @Builder
+  recordSheet() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#66000000')
+        .onClick(() => { this.closeRecorder(); })
+
+      Column() {
+        // 顶部小横条
+        Row()
+          .width(36)
+          .height(4)
+          .borderRadius(2)
+          .backgroundColor(Color.line)
+          .margin({ top: 8, bottom: 14 })
+
+        Text(this.recSheetEditId.length > 0 ? '重录这段语音' : '录一段语音')
+          .fontSize(Font.section)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.ink)
+
+        Text(this.recording ? '正在录音，说完再点一下按钮' : (this.recSheetPath.length > 0 ? '不满意可以再点一次重录' : '点下面的按钮开始'))
+          .fontSize(Font.tiny)
+          .fontColor(Color.muted)
+          .margin({ top: 6 })
+
+        // 主按钮：开始 / 结束
+        Stack() {
+          if (this.recording) {
+            // 录音中：方块 = 停止
+            Row()
+              .width(26)
+              .height(26)
+              .borderRadius(5)
+              .backgroundColor(Color.warmInk)
+          } else {
+            // 待录 / 已录：圆点 = 开始
+            Row()
+              .width(28)
+              .height(28)
+              .borderRadius(14)
+              .backgroundColor(Color.green)
+          }
+        }
+        .width(84)
+        .height(84)
+        .borderRadius(42)
+        .backgroundColor(Color.greenSoft)
+        .margin({ top: 22, bottom: 14 })
+        .onClick(() => {
+          this.toggleSheetRecord();
+        })
+
+        Text(this.recording
+          ? TimeUtil.clock(this.recordSecs)
+          : (this.recSheetPath.length > 0 ? TimeUtil.clock(this.recSheetSecs) : '0:00'))
+          .fontSize(22)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.recording ? Color.warmInk : Color.ink)
+
+        if (this.recSheetError.length > 0) {
+          Text(this.recSheetError)
+            .fontSize(Font.tiny)
+            .fontColor(Color.warmInk)
+            .margin({ top: 8 })
+            .padding({ left: 16, right: 16 })
+            .textAlign(TextAlign.Center)
+        }
+
+        // 底部两个动作
+        Row() {
+          Text('取消')
+            .fontSize(Font.body)
+            .fontColor(Color.muted)
+            .textAlign(TextAlign.Center)
+            .layoutWeight(1)
+            .height(48)
+            .onClick(() => { this.closeRecorder(); })
+
+          Text(this.recSheetEditId.length > 0 ? '换这一条' : '用这一段')
+            .fontSize(Font.body)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.recSheetPath.length > 0 && !this.recording ? Color.green : Color.muted2)
+            .textAlign(TextAlign.Center)
+            .layoutWeight(1)
+            .height(48)
+            .onClick(() => {
+              if (this.recording) {
+                return;
+              }
+              this.confirmRecording();
+            })
+        }
+        .width('100%')
+        .margin({ top: 18 })
+      }
+      .width('100%')
+      .padding({ left: Size.pageH, right: Size.pageH, bottom: 26 })
+      .backgroundColor(Color.bg)
+      .borderRadius({ topLeft: Size.radiusSheet, topRight: Size.radiusSheet })
+      .transition(TransitionEffect.translate({ y: 420 }).animation({ duration: 240, curve: Curve.FastOutSlowIn }))
+    }
+    .width('100%')
+    .height('100%')
   }
 
   @Builder
@@ -428,7 +617,7 @@ export struct EditorPage {
           .onClick(() => { this.appendImages(block.id); })
         }
         .width('100%')
-      } else {        // 语音：内嵌进度条，不跳页
+      } else {        // 语音：内嵌播放条，不跳页
         Row() {
           Text(this.playingId === block.id ? '❚❚' : '▶')
             .fontSize(12)
@@ -440,22 +629,29 @@ export struct EditorPage {
             .borderRadius(15)
             .onClick(() => { this.playBlock(block); })
 
-          Text(this.recording
-            ? `录音中 ${TimeUtil.clock(this.recordSecs)}`
-            : (block.duration === undefined ? '点左侧按钮开始录音' : TimeUtil.clock(block.duration)))
+          // 只认这一块自己的 duration。
+          // 之前这里写的是 `this.recording ? 录音中 ${this.recordSecs} : ...`，
+          // recording/recordSecs 是页面级状态，于是新录一条时
+          // 列表里所有语音块都跟着显示新录音的计时 —— 就是这个 bug 的来源。
+          Text(block.duration === undefined ? '没有录到声音' : TimeUtil.clock(block.duration))
             .fontSize(Font.caption)
-            .fontColor(block.duration === undefined && !this.recording ? Color.muted2 : Color.ink2)
+            .fontColor(block.duration === undefined ? Color.muted2 : Color.ink2)
             .margin({ left: 10 })
 
           Blank()
 
-          if (block.duration !== undefined && !this.recording) {
-            Text('重录')
-              .fontSize(Font.tiny)
-              .fontColor(Color.muted)
-              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-              .onClick(() => { this.toggleRecord(block.id); })
-          }
+          Text('重录')
+            .fontSize(Font.tiny)
+            .fontColor(Color.muted)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .onClick(() => { this.openRecorder(block.id); })
+
+          Text('删除')
+            .fontSize(Font.tiny)
+            .fontColor(Color.muted2)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .margin({ left: 4 })
+            .onClick(() => { this.removeBlock(block.id); })
         }
         .width('100%')
         .height(54)
