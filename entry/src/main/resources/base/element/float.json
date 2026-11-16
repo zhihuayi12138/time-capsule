@@ -1,0 +1,28 @@
+{
+  "float": [
+    {
+      "name": "radius_card",
+      "value": "16vp"
+    },
+    {
+      "name": "radius_sheet",
+      "value": "24vp"
+    },
+    {
+      "name": "space_page",
+      "value": "24vp"
+    },
+    {
+      "name": "font_title",
+      "value": "26fp"
+    },
+    {
+      "name": "font_body",
+      "value": "15fp"
+    },
+    {
+      "name": "font_caption",
+      "value": "13fp"
+    }
+  ]
+}

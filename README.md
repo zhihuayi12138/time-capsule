@@ -4,7 +4,27 @@
 
 鸿蒙原生应用「时间胶囊」的产品设计与高保真原型仓库。写完之后**真正封存**，不到约定那一天，连自己都打不开。
 
-本仓库当前阶段：**阶段一 立项与设计 → 阶段二 静态界面**（页面原型已完成，尚未进入 ArkTS 编码）。
+本仓库当前阶段：**阶段二 静态界面**（页面原型已完成，HarmonyOS 工程骨架已可编译出 HAP，业务逻辑待实现）。
+
+---
+
+## 快速开始
+
+环境：DevEco Studio 26.0.0.821（内置 hvigor 6.26.4、JBR、API 26 SDK）。
+
+```bash
+build.cmd            # 编译，产物 entry/build/default/outputs/default/entry-default-unsigned.hap
+build.cmd clean      # 先清理再编译
+```
+
+工程也可以直接用 DevEco Studio 打开根目录运行。
+
+> **本机踩坑记录**：hvigor / ohpm / java 都不在 PATH 上，且
+> `libimage_transcoder_shared.dll` 依赖的 `libcjson`、`libhilog`、`libskia_canvaskit`
+> 分散在 `openharmony\previewer\common\bin` 等其他目录。直接调用 hvigor 会在
+> 资源编译阶段报 `An Application Control policy has blocked this file`
+> （Windows 错误 4551 实际是"找不到依赖库"，不是被策略拦截）。
+> `build.cmd` 已经把这些目录拼进 PATH，绕开这个问题。
 
 ---
 
@@ -20,7 +40,23 @@
 
 ```
 time-capsule/
-├── prototypes/              页面原型（537×1163 PNG，逻辑尺寸 375×812）
+├── AppScope/                   应用级配置与图标（分层图标 background/foreground）
+├── entry/                      entry 模块
+│   └── src/main/
+│       ├── ets/
+│       │   ├── entryability/        EntryAbility.ets
+│       │   ├── entrybackupability/  EntryBackupAbility.ets
+│       │   ├── common/              Tokens.ets 设计令牌、TimeUtil.ets、Constants.ets
+│       │   ├── model/               Capsule.ets 数据模型与状态枚举
+│       │   ├── view/                CommonViews.ets（NavBar/PrimaryButton）、CapsuleCard.ets
+│       │   └── pages/               Index.ets（根 + Navigation + 封存弹层）
+│       │                            HomePage / EditorPage / DetailPage / MinePage / BackupPage
+│       └── resources/           color/string/float 资源 + main_pages + backup_config
+├── build-profile.json5         构建配置（compatibleSdkVersion 26.0.0）
+├── hvigor/hvigor-config.json5  modelVersion 26.0.0
+├── build.cmd                   离线编译入口（已处理 PATH 依赖）
+├── make_icon.py                图标生成（Pillow）
+├── prototypes/                 页面原型（537×1163 PNG，逻辑尺寸 375×812）
 │   ├── 01.png               首页 · 胶囊架
 │   ├── 02.png               首页 · 空状态
 │   ├── 03.png               约定时间 · 初始
@@ -51,9 +87,9 @@ time-capsule/
 时间胶囊
 ├─ 首页 · 胶囊架
 │   ├─ 待开启 ──进详情──→ 胶囊详情 · 封存中（内容遮蔽）
-│   ├─ 已封存 ──进详情──→ 胶囊详情 · 封存中
-│   └─ 已开启 ──进详情──→ 胶囊详情 · 已开启
-├─ 约定时间 ──下一步──→ 封存确认 ──→ 回到首页
+│   ├─ 已开启 ──进详情──→ 胶囊详情 · 已开启
+│   └─ 草稿   ──进详情──→ 约定时间（继续编辑）
+├─ 约定时间 ──封存──→ 封存确认（bindSheet）──→ 回到首页
 ├─ 我的
 │   ├─ 通知与卡片
 │   ├─ 备份与导出
@@ -61,6 +97,10 @@ time-capsule/
 │
 └─ 外部入口：到期通知 / 桌面服务卡片 ──→ 胶囊详情 · 已开启（直达）
 ```
+
+> 立项书结构图把「待开启」指向了「详情 · 已开启」，且「已封存」与「待开启」语义重叠。
+> 工程实现按修正后的三态走：**待开启 / 已开启 / 草稿**——「待开启」进「封存中」，
+> 草稿回到编辑器，「已封存」并入「待开启」。
 
 **两条关键路径的步数**
 
@@ -144,25 +184,29 @@ python make_index.py              # 生成索引页 index.html
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | 一 | 立项与设计（需求、竞品、页面结构、原型） | ✅ 已完成 |
-| 二 | 静态界面（三页骨架 + 跳转） | 待开始 |
-| 三 | 导航与状态（草稿 / 已封存 / 待开启 / 已开启四态） | — |
-| 四 | 数据与业务（Preferences、内容块、到期计算） | — |
-| 五 | 通知、卡片、备份 | — |
-| 六 | 测试与优化 | — |
+| 二 | 静态界面（工程骨架 + 五页静态布局） | ✅ 已完成 |
+| 三 | 导航与状态（草稿 / 待开启 / 已开启三态打通） | 进行中 |
+| 四 | 数据与业务（RDB 两表、内容块、到期计算） | 待开始 |
+| 五 | 通知、卡片、备份 | 待开始 |
+| 六 | 测试与优化 | 待开始 |
 
 ---
 
 ## ArkUI 组件映射
 
-| 页面 | 主要组件 | 备注 |
+| 页面 | 主要组件 | 实现状态 |
 |---|---|---|
-| 首页胶囊架 | `Tabs`、`List`、`LazyForEach`、`@State` | 可直接实现 |
-| 约定时间 | `TextInput`、`TextArea`、`DatePicker`、`List`、`@Builder` | 图片/音频待学习 |
-| 封存确认 | `bindSheet`、`Button`、`animateTo` | 可直接实现 |
-| 详情 · 封存中 | `Text`、`Progress`、定时器 | 可直接实现 |
-| 详情 · 已开启 | `Image`、`Swiper`、`AVPlayer` | AVPlayer 待学习 |
-| 我的 | `List`、`Toggle`、`Preferences` | 可直接实现 |
-| 桌面卡片 | ArkTS 卡片 / `FormComponent` | 待学习 |
+| 首页胶囊架 | `Tabs` 手写分组标签、`List`、`ForEach`、`@Builder` | ✅ 已实现 |
+| 约定时间 | `TextInput`、`Scroll`、`@Builder`、键盘避让 | ✅ 已实现（图片/音频待接） |
+| 封存确认 | `bindSheet` + 自定义内容 | ✅ 已实现 |
+| 详情 · 封存中 | `Text`、自绘进度条 | ✅ 已实现 |
+| 详情 · 已开启 | `ForEach`、`Image`（占位）、内嵌音频条 | ⚠️ 音频待接 AVPlayer |
+| 我的 | `Toggle`、自定义行 | ✅ 已实现 |
+| 备份与导出 | 统计栏、操作卡 | ✅ 静态 |
+| 桌面卡片 | ArkTS 卡片 + `FormExtensionAbility` | ❌ 未开始 |
+
+**当前为纯静态骨架**：`Index.ets` 里的胶囊列表是空数组，数据层（RDB / Preferences）
+与通知、卡片均未接入。页面间导航与状态流转已打通，可运行查看。
 
 ---
 

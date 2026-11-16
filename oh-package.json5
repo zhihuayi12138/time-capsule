@@ -1,0 +1,8 @@
+{
+  "modelVersion": "26.0.0",
+  "description": "TimeCapsule - a HarmonyOS native app that locks words into time.",
+  "dependencies": {
+  },
+  "devDependencies": {
+  }
+}

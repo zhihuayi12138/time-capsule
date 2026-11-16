@@ -8,6 +8,8 @@ __pycache__/
 *.log
 dashtest.png
 crop_*.png
+_preview_*.png
+build_out.txt
 
 # 编辑器 / 系统
 .vscode/
@@ -20,3 +22,19 @@ desktop.ini
 node_modules/
 .venv/
 venv/
+
+# HarmonyOS 构建产物
+/oh_modules
+**/oh_modules
+/local.properties
+**/build
+/.hvigor
+.cxx
+/.clangd
+/.clang-format
+/.clang-tidy
+**/.test
+/.appanalyzer
+*.hap
+*.hsp
+*.har
