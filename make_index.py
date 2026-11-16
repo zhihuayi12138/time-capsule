@@ -1,0 +1,114 @@
+﻿# -*- coding: utf-8 -*-
+"""生成原型索引页 index.html（可直接双击浏览）。"""
+import os
+
+OUT = r"D:\time-capsule\prototypes"
+
+GROUPS = [
+    ("主流程 · 与时间做一个约定", "首页 → 约定时间 → 封存确认（3 步）", [
+        ("01", "首页 · 胶囊架", "P1 / F4", "待开启 1 · 已封存 3 · 已开启 2；到期卡片暖色高亮并直接给「打开胶囊」，其余卡片只露标题与倒计时；新建入口只保留底部一个按钮"),
+        ("02", "首页 · 空状态", "P1 / F4", "没有任何约定时：圆形示意 + 「时间还没有开始」+ 两行提问引导 + 中部「与时间约定」按钮；底部固定按钮文案为「+ 与时间的第一个约定」，比「新建」更像一次起誓"),
+        ("03", "约定时间 · 初始", "P2 / F3", "标题占位是引导语不是「请输入标题」；新增只读的「创建时间」字段；「封存」置灰，底部按钮同样置灰"),
+        ("04", "约定时间 · 编辑中", "P2 / F3", "标题 / 开启时间 / 创建时间（只读）/ 内容；文字、图片、语音三种内容块混排，共用同一套添加按钮"),
+        ("05", "封存确认", "P3 / F1", "bindSheet 底部弹层；三行摘要 + 暖色不可逆警示框 + 「确认封存」/「再想想」"),
+    ]),
+    ("详情 · 两种状态", "封存中内容遮蔽；已开启才可回看", [
+        ("06", "详情 · 封存中", "P4 / F1·F4", "锁形虚线卡「内容已封存 · 连你也看不到」；大号剩余天数 + 进度条；无任何查看内容入口"),
+        ("07", "详情 · 已开启", "P5 / F1", "顶部「已等待 365 天 · 刚刚开启」把时间本身当内容；音频内嵌为进度条不跳页"),
+    ]),
+    ("我的 · 设置分支", "从「我的」进入的三个二级页", [
+        ("08", "我的", "P6 / F5", "提醒 / 数据 / 其他三组；通知与卡片开关、备份入口、胶囊统计"),
+        ("09", "通知与卡片", "P6·1 / F2", "到期通知开关、系统权限状态、提醒时间、桌面卡片尺寸，附卡片实时预览"),
+        ("10", "备份与导出", "P6·2 / F5", "胶囊数 / 内容块 / 占用三栏统计；导出、恢复、上次备份信息"),
+        ("11", "关于", "P6·3", "版本信息 + 「所有胶囊仅保存在你的设备上」的隐私声明"),
+    ]),
+    ("外部入口 · 不打开 App 也能被找到", "两条关键路径里的「通知 → 详情」", [
+        ("12", "通知授权引导", "首次进入 / F2", "解释「只在到期那天发一条」，并给「用桌面卡片代替」的退路"),
+        ("13", "到期通知", "系统通知 / F2", "锁屏通知：「『给一年后的我』可以打开了 · 它等了你 365 天」"),
+        ("14", "桌面服务卡片", "桌面 / F2", "4×2 与 2×2 两种尺寸；不打开 App 也能看见时间在走"),
+    ]),
+]
+
+HTML = """<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>时间胶囊 · 全页面原型</title>
+<style>
+:root{--bg:#F5F1EA;--ink:#1E2420;--ink2:#454B47;--muted:#8C8A82;--muted2:#B4B0A5;
+--green:#2C5F55;--gsoft:#E6F0EC;--line:#E8E2D6;--warm:#FDF6E8;--warmln:#EAD9B4;--warmink:#A8742A}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif;
+-webkit-font-smoothing:antialiased;padding:56px 48px 96px}
+head,header{display:block}
+.top{max-width:1560px;margin:0 auto 12px}
+h1{font-size:34px;font-weight:800;letter-spacing:-.8px}
+.lede{font-size:14px;color:var(--muted);margin-top:10px;line-height:1.8}
+.meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+.chip{font-size:11.5px;font-weight:700;letter-spacing:.3px;padding:6px 12px;border-radius:20px;
+background:#fff;color:var(--ink2);border:1px solid var(--line)}
+.chip.g{background:var(--gsoft);color:var(--green);border-color:transparent}
+.rule{height:1px;background:var(--line);margin:36px auto 0;max-width:1560px}
+section{max-width:1560px;margin:52px auto 0}
+.gh{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+.gh h2{font-size:19px;font-weight:800;letter-spacing:-.2px}
+.gh span{font-size:12.5px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:34px;margin-top:26px}
+figure{background:transparent}
+.shot{border-radius:20px;overflow:hidden;border:1px solid #E0DACB;
+box-shadow:0 10px 28px rgba(60,55,45,.10);transition:transform .18s ease,box-shadow .18s ease}
+.shot:hover{transform:translateY(-3px);box-shadow:0 16px 36px rgba(60,55,45,.16)}
+.shot img{display:block;width:100%}
+figcaption{padding:14px 2px 0}
+.cap{display:flex;align-items:center;gap:8px}
+.num{font-size:11px;font-weight:800;color:var(--green);background:var(--gsoft);
+padding:2px 7px;border-radius:6px;letter-spacing:.4px}
+.cap b{font-size:14.5px;font-weight:700}
+.tag{font-size:11px;color:var(--muted2);margin-left:auto;letter-spacing:.2px}
+.note{font-size:12px;color:var(--muted);line-height:1.75;margin-top:9px}
+.foot{max-width:1560px;margin:72px auto 0;padding-top:26px;border-top:1px solid var(--line);
+font-size:12px;color:var(--muted2);line-height:1.9}
+</style></head><body>
+<div class="top">
+  <h1>时间胶囊 · 全页面原型</h1>
+  <div class="lede">14 个画面，覆盖文档里 6 个页面 + 通知与卡片设置、备份与导出、关于、通知授权引导，以及两个外部入口。<br>
+  375×812 逻辑尺寸；配色与 4 张原稿逐像素对齐（底色 #F5F1EA · 主色 #2C5F55 · 暖色 #FDF6E8）。</div>
+  <div class="meta">
+    <span class="chip g">鸿蒙原生 · ArkTS / ArkUI</span>
+    <span class="chip">封存 3 步 · 打开 2 步</span>
+    <span class="chip">不做社交 · 不上传 · 不联网</span>
+  </div>
+</div>
+<div class="rule"></div>
+__SECTIONS__
+<div class="foot">
+  设计令牌：bg #F5F1EA · ink #1E2420 · ink2 #454B47 · muted #8C8A82 · green #2C5F55 · green-soft #E6F0EC · line #E8E2D6 · warm-bg #FDF6E8 · warm-line #EAD9B4 · warm-ink #A8742A<br>
+  字体 PingFang SC / 微软雅黑。所有画面与文档第 8~9 章的页面清单一一对应。
+</div>
+</body></html>"""
+
+blocks = []
+for title, sub, items in GROUPS:
+    cards = []
+    for num, name, tag, note in items:
+        cards.append(f"""<figure>
+      <div class="shot"><img src="{num}.png" alt="{name}"></div>
+      <figcaption>
+        <div class="cap"><span class="num">{num}</span><b>{name}</b><span class="tag">{tag}</span></div>
+        <div class="note">{note}</div>
+      </figcaption>
+    </figure>""")
+    blocks.append(f"""<section>
+  <div class="gh"><h2>{title}</h2><span>{sub}</span></div>
+  <div class="grid">
+    {''.join(cards)}
+  </div>
+</section>""")
+
+html = HTML.replace("__SECTIONS__", "\n".join(blocks))
+p = os.path.join(OUT, "index.html")
+with open(p, "w", encoding="utf-8") as f:
+    f.write(html)
+print("OK", p)
+
+
+
+

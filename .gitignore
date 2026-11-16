@@ -1,0 +1,22 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.pyo
+
+# 临时产物
+*.tmp
+*.log
+dashtest.png
+crop_*.png
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 依赖
+node_modules/
+.venv/
+venv/
