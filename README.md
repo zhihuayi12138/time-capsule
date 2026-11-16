@@ -4,7 +4,7 @@
 
 鸿蒙原生应用「时间胶囊」的完整实现与设计仓库。写完之后**真正封存**，不到约定那一天，连自己都打不开。
 
-本仓库当前阶段：**阶段四 已可用**（数据持久化、图片音频、到期提醒、备份导出、桌面卡片全部接通，已在 HarmonyOS 模拟器上端到端跑通）。
+本仓库当前阶段：**阶段六 已完成**（六阶段全部落地：数据持久化、图片音频、到期提醒、备份导出、桌面卡片全部接通，并在 HarmonyOS 7.0.0 / API 26 模拟器上端到端跑通、逐页验收）。
 
 功能一览：
 
@@ -66,7 +66,7 @@ time-capsule/
 │       │   └── pages/               Index.ets（根 + Navigation + 封存弹层）
 │       │                            HomePage / EditorPage / DetailPage / MinePage / BackupPage
 │       └── resources/           color/string/float 资源 + main_pages + backup_config + form_config
-├── build-profile.json5         构建配置（compatibleSdkVersion 6.1.0(23)）
+├── build-profile.json5         构建配置（compatibleSdkVersion 26.0.0）
 ├── hvigor/hvigor-config.json5  modelVersion 26.0.0
 ├── build.cmd                   离线编译入口（已处理 PATH 依赖）
 ├── make_icon.py                图标生成（Pillow）
@@ -232,7 +232,7 @@ zip 内含 `capsules.json` + `media/`。`formatVersion: 1`，恢复时**整库�
 | 三 | 导航与状态（Tab + Navigation，三态打通） | ✅ 已完成 |
 | 四 | 数据与业务（RDB 两表、内容块、到期计算、图片音频） | ✅ 已完成 |
 | 五 | 通知、卡片、备份 | ✅ 已完成（模拟器已验证，真机签名后需复测提醒） |
-| 六 | 测试与优化 | 进行中 |
+| 六 | 测试与优化 | ✅ 已完成（换 API 26 模拟器复测，修 6 处交互与状态缺陷） |
 
 ---
 
@@ -254,9 +254,13 @@ zip 内含 `capsules.json` + `media/`。`formatVersion: 1`，恢复时**整库�
 
 ### 模拟器环境说明
 
-模拟器镜像为 HarmonyOS 6.1.0(23)，因此 `compatibleSdkVersion` 必须写 `"6.1.0(23)"`（写裸 `"23"` 会被 hvigor 拒绝，写 `"26.0.0"` 则装不进设备）；`targetSdkVersion` 保持 `"26.0.0"`。
+当前验证环境为 **HarmonyOS 7.0.0 (API 26)** 模拟器（Mate 90 Pro），因此 `compatibleSdkVersion` 与 `targetSdkVersion` 都写 `"26.0.0"`。
 
-**已知环境限制**：模拟器上 `reminderAgentManager.publishReminder` 会因 `reminder_capability` 云能力校验失败而拒绝（`VerifyCloudCapability failed`），且未签名 HAP 无证书。这是环境限制而非代码缺陷，真机签名后可用。降级路径是应用打开时比对时间 + 桌面卡片倒计时，两者均已验证正常。
+版本号格式有硬约束：API ≥ 26 用 `"26.0.0"` 这种纯平台版本，API 10–25 必须带括号写 `"6.1.0(23)"`，写成裸 `"23"` 会被 hvigor 以 `00306042 Specification Limit Violation` 拒绝。
+
+**已知环境限制**：模拟器上 `reminderAgentManager.publishReminder` 会因 `reminder_capability` 云能力校验失败而拒绝（`VerifyCloudCapability failed`），且未签名 HAP 无证书。这是环境限制而非代码缺陷，真机签名后可用。
+
+降级路径已实现并验证：应用打开时比对时间自动把过期胶囊标成到期 + 桌面卡片显示倒计时。**这类降级不能悄悄发生**——「我的」页在排程失败时会显示「系统提醒没有排上，到时间不会自动弹通知 / 打开应用时会自动标成到期」，封存时的提示也会如实说明，避免用户以为设了提醒而实际没有。
 
 ---
 

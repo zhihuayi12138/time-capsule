@@ -13,8 +13,18 @@ export struct HomePage {
   /** 由根页面每 30 秒推一次，「今天到期」才会在打开着的时候自己翻过来 */
   @Prop nowMs: number = 0;
   @State tab: CapsuleTab = CapsuleTab.Pending;
+  /**
+   * 外部（根页面）想强制回到「待开启」时把这个数加一。
+   * 典型场景：刚封存完一个胶囊，用户必须立刻在待开启列表里看到它，
+   * 而不是还停在草稿标签页上以为没封进去。
+   */
+  @Prop @Watch('onResetTokenChanged') resetToken: number = 0;
   onNewCapsule: () => void = () => {};
   onOpenCapsule: (c: Capsule) => void = () => {};
+
+  private onResetTokenChanged(propName: string): void {
+    this.tab = CapsuleTab.Pending;
+  }
 
   private filterByTab(tab: CapsuleTab): Capsule[] {
     const list = this.capsules.filter((c: Capsule) => {
@@ -51,6 +61,7 @@ export struct HomePage {
   private subtitle(): string {
     const pending = this.countOf(CapsuleTab.Pending);
     const due = this.dueCount();
+    const drafts = this.countOf(CapsuleTab.Draft);
     if (due > 0) {
       return `${due} 个约定已经到时间了`;
     }
@@ -59,6 +70,10 @@ export struct HomePage {
     }
     if (this.countOf(CapsuleTab.Opened) > 0) {
       return '打开的都在下面，要不要再写一封';
+    }
+    // 只有草稿时不能再说"还没有约定过"——草稿就是写了一半的约定
+    if (drafts > 0) {
+      return `${drafts} 篇还没封存的草稿，随时可以接着写`;
     }
     return '还没有和未来约定过什么';
   }

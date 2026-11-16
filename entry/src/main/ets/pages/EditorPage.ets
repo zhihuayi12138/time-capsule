@@ -30,6 +30,13 @@ export struct EditorPage {
   @State playingId: string = '';
   onCancel: () => void = () => {};
   /**
+   * 点取消时，如果已经写了东西，交给外层存成草稿。
+   * 不自动存的话「草稿」这个分组永远是空的 —— 用户写了半篇关掉就没了。
+   * 传空标题空内容时不存，避免每次点取消都留一条空气泡。
+   */
+  onSaveDraft: (title: string, blocks: ContentBlock[], openAt: number) => void =
+    (title: string, blocks: ContentBlock[], openAt: number) => {};
+  /**
    * 点击封存 → 由外层弹出封存确认弹层。
    * 这里把标题、内容块、开启时间一并交出去，而不是让外层去读 this.draft：
    * 编辑器内部对 blocks 用的是整体替换（this.blocks = next），
@@ -55,6 +62,19 @@ export struct EditorPage {
 
   private canSeal(): boolean {
     return this.title.trim().length > 0 && this.blocks.length > 0;
+  }
+
+  /**
+   * 离开编辑器：写了东西就存草稿，什么都没写就直接退。
+   * 判空看标题与内容块，两者都空视为没写过。
+   */
+  private leave(): void {
+    const hasSomething = this.title.trim().length > 0 || this.blocks.length > 0;
+    if (hasSomething) {
+      this.onSaveDraft(this.title, this.blocks, this.draft.openAt);
+    } else {
+      this.onCancel();
+    }
   }
 
   /** 整体替换数组以触发刷新，再回写给外层草稿 */
@@ -238,7 +258,7 @@ export struct EditorPage {
         leftText: '取消',
         rightText: '封存',
         rightEnabled: this.canSeal(),
-        onLeft: () => this.onCancel(),
+        onLeft: () => this.leave(),
         onRight: () => this.onRequestSeal(this.title, this.blocks, this.draft.openAt)
       })
 

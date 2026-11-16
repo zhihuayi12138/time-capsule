@@ -1,15 +1,16 @@
 """生成应用图标：分层图标 background/foreground + 启动图标 startIcon + 单层兜底 app_icon。
 
-设计令牌与原型一致：主色 #2C5F55，暖白 #FDF6E8，暖线 #EAD9B4。
+统一视觉：主色圆角方块底 + 暖白虚线胶囊轮廓。
+虚线是有意的——它表示"一个还没打开的东西"，与产品里「内容已封存」的虚线卡同源。
+
     python make_icon.py
 """
+import math
 from PIL import Image, ImageDraw, ImageFilter
 
 GREEN = (44, 95, 85)
-GREEN_L = (58, 116, 104)
-GREEN_HI = (66, 128, 115)
+GREEN_D = (31, 64, 57)
 CREAM = (253, 246, 232)
-WARM = (234, 217, 180)
 
 
 def _ss(size):
@@ -21,37 +22,82 @@ def _ss(size):
     return 4
 
 
-def pill(px, body_color, seam_color, hi_alpha=55, w_ratio=0.42, h_ratio=0.86):
-    """在 px×px 画布上画竖向药丸（时间胶囊）。返回该分辨率的 RGBA 图。"""
+def _capsule_outline(cx, cy, w, h, steps=72):
+    """竖向胶囊的闭合轮廓：上下两个半圆 + 左右两条竖边。
+
+    竖胶囊的圆角半径等于半宽，所以上下是半圆、左右是直边。
+    之前把圆心错放在左右两侧，画出来是个带折角的怪形状——圆心必须在上下。
+    """
+    r = w / 2.0
+    y_top = cy - h / 2.0 + r      # 上半圆的圆心 y
+    y_bot = cy + h / 2.0 - r      # 下半圆的圆心 y
+    pts = []
+    # 上半圆：180° -> 360°，左 -> 上 -> 右
+    for i in range(steps + 1):
+        a = math.pi + math.pi * i / steps
+        pts.append((cx + r * math.cos(a), y_top + r * math.sin(a)))
+    # 右竖边：从 (x1, y_top) 下行到 (x1, y_bot)
+    for i in range(1, steps + 1):
+        pts.append((cx + r, y_top + (y_bot - y_top) * i / steps))
+    # 下半圆：0° -> 180°，右 -> 下 -> 左
+    for i in range(1, steps + 1):
+        a = math.pi * i / steps
+        pts.append((cx + r * math.cos(a), y_bot + r * math.sin(a)))
+    # 左竖边：从 (x0, y_bot) 上行回 (x0, y_top)
+    for i in range(1, steps + 1):
+        pts.append((cx - r, y_bot - (y_bot - y_top) * i / steps))
+    return pts
+
+
+def _dash_polyline(d, pts, color, sw, dash, gap):
+    """沿折线按弧长交替画 dash / gap。
+
+    remain 跨线段连续递减，这样虚线在拐角处不会重新起算、出现一长一短。
+    端点不补圆帽——线宽本身已经把短线撑成一块，再补圆帽会把 gap 吃掉，
+    整圈就糊成实线（第一版就是这么翻车的）。
+    """
+    on = True
+    remain = dash
+    prev = pts[0]
+    for cur in pts[1:]:
+        dx = cur[0] - prev[0]
+        dy = cur[1] - prev[1]
+        seg = math.hypot(dx, dy)
+        if seg <= 0:
+            continue
+        t = 0.0
+        while t < seg - 1e-9:
+            take = min(remain, seg - t)
+            if on:
+                a = (prev[0] + dx * (t / seg), prev[1] + dy * (t / seg))
+                b = (prev[0] + dx * ((t + take) / seg), prev[1] + dy * ((t + take) / seg))
+                d.line([a, b], fill=color + (255,), width=int(round(sw)))
+            t += take
+            remain -= take
+            if remain <= 1e-9:
+                on = not on
+                remain = dash if on else gap
+        prev = cur
+
+
+def dashed_pill(px, color, stroke_ratio=0.082, w_ratio=0.40, h_ratio=0.62,
+                dash_ratio=0.135, gap_ratio=0.078):
+    """画虚线胶囊轮廓。px 是画布边长，返回 RGBA 图层。
+
+    dash 必须明显长于线宽（这里约 1.6 倍），否则每段虚线比它自己还粗，
+    连起来就是一整圈实线。
+    """
     img = Image.new("RGBA", (px, px), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
     w = px * w_ratio
     h = px * h_ratio
-    x0 = (px - w) / 2
-    y0 = (px - h) / 2
-    x1 = x0 + w
-    y1 = y0 + h
-    r = w / 2
+    sw = max(1.0, w * stroke_ratio)
+    dash = max(1.0, w * dash_ratio)
+    gap = max(1.0, w * gap_ratio)
 
-    d.rounded_rectangle([x0, y0, x1, y1], radius=r, fill=body_color + (255,))
-
-    # 中缝：横贯胶囊，两端各补一个半圆，视觉上是两段对齐的壳
-    sy = y0 + h * 0.42
-    th = max(2.0, w * 0.085)
-    d.rectangle([x0, sy - th / 2, x1, sy + th / 2], fill=seam_color + (255,))
-    d.ellipse([x0 - th / 2, sy - th / 2, x0 + th / 2, sy + th / 2], fill=seam_color + (255,))
-    d.ellipse([x1 - th / 2, sy - th / 2, x1 + th / 2, sy + th / 2], fill=seam_color + (255,))
-
-    # 左上半高光
-    if hi_alpha:
-        gl = Image.new("RGBA", (px, px), (0, 0, 0, 0))
-        gd = ImageDraw.Draw(gl)
-        gd.rounded_rectangle(
-            [x0 + w * 0.17, y0 + h * 0.12, x0 + w * 0.33, y0 + h * 0.32],
-            radius=w * 0.08, fill=(255, 255, 255, hi_alpha))
-        img = Image.alpha_composite(img, gl)
-
+    pts = _capsule_outline(px / 2.0, px / 2.0, w, h)
+    _dash_polyline(d, pts, color, sw, dash, gap)
     return img
 
 
@@ -67,48 +113,56 @@ def rounded(canvas, radius_ratio):
 
 
 def make_background(size=1024):
-    """分层图标底层：主色径向渐变（不透明）。"""
+    """分层图标底层：主色方块（不透明）。
+
+    分层图标由系统裁圆角，所以这里必须是满幅方形——自己裁圆角会露出白边。
+    渐变只做很轻的一点，避免在不同桌面壁纸上显得脏。
+    """
     px = size * _ss(size)
     img = Image.new("RGB", (px, px), GREEN)
     d = ImageDraw.Draw(img)
-    d.ellipse([-px * 0.35, -px * 0.40, px * 1.35, px * 1.10], fill=GREEN_HI)
-    d.ellipse([px * 0.10, px * 0.06, px * 0.90, px * 0.86], fill=GREEN_L)
-    img = img.filter(ImageFilter.GaussianBlur(px * 0.09))
+    d.ellipse([-px * 0.30, -px * 0.35, px * 1.30, px * 1.05], fill=(52, 106, 94))
+    d.ellipse([px * 0.16, px * 0.12, px * 0.94, px * 0.90], fill=GREEN)
+    img = img.filter(ImageFilter.GaussianBlur(px * 0.08))
     return img.resize((size, size), Image.LANCZOS).convert("RGB")
 
 
 def make_foreground(size=1024):
-    """分层图标顶层：暖白胶囊，压在 58% 安全区内，背景全透明。"""
+    """分层图标顶层：暖白虚线胶囊，压在 60% 安全区内，背景全透明。"""
     px = size * _ss(size)
-    inner = int(px * 0.58)
-    art = pill(inner, CREAM, GREEN, hi_alpha=95)
+    # 70% 画布 + 内部图形自身占比，合成后落在安全区内
+    inner = int(px * 0.70)
+    art = dashed_pill(inner, CREAM, stroke_ratio=0.085, w_ratio=0.56, h_ratio=0.88)
     canvas = Image.new("RGBA", (px, px), (0, 0, 0, 0))
     canvas.paste(art, ((px - inner) // 2, (px - inner) // 2), art)
     return canvas.resize((size, size), Image.LANCZOS)
 
 
-def make_start_icon(size=432):
-    """启动图标：暖白圆角底 + 主色胶囊。"""
+def _flat_icon(size, radius_ratio):
+    """单层图标：主色圆角方块 + 暖白虚线胶囊，圆角自己裁。"""
     ss = _ss(size)
     px = size * ss
-    canvas = Image.new("RGBA", (px, px), CREAM + (255,))
-    art = pill(int(px * 0.80), GREEN, CREAM, hi_alpha=45)
-    off = (px - int(px * 0.80)) // 2
-    canvas.paste(art, (off, off), art)
+    canvas = Image.new("RGBA", (px, px), GREEN + (255,))
+    # 轻微径向提亮，让方块不显得死板
+    glow = Image.new("L", (px, px), 0)
+    ImageDraw.Draw(glow).ellipse([px * 0.02, px * 0.0, px * 0.98, px * 0.96], fill=26)
+    tint = Image.new("RGBA", (px, px), (66, 128, 115, 255))
+    canvas = Image.composite(tint, canvas, glow.filter(ImageFilter.GaussianBlur(px * 0.10)))
+
+    art = dashed_pill(px, CREAM, stroke_ratio=0.082, w_ratio=0.40, h_ratio=0.62)
+    canvas = Image.alpha_composite(canvas, art)
     canvas.info["ss"] = ss
-    return rounded(canvas, 0.22)
+    return rounded(canvas, radius_ratio)
+
+
+def make_start_icon(size=432):
+    """启动图标：主色圆角方块 + 暖白虚线胶囊。"""
+    return _flat_icon(size, 0.23)
 
 
 def make_launcher_icon(size=1024):
-    """单层兜底图标（app_icon）：暖白圆角底 + 主色胶囊。"""
-    ss = _ss(size)
-    px = size * ss
-    canvas = Image.new("RGBA", (px, px), CREAM + (255,))
-    art = pill(int(px * 0.80), GREEN, CREAM, hi_alpha=45)
-    off = (px - int(px * 0.80)) // 2
-    canvas.paste(art, (off, off), art)
-    canvas.info["ss"] = ss
-    return rounded(canvas, 0.22)
+    """单层兜底图标（app_icon）。"""
+    return _flat_icon(size, 0.23)
 
 
 if __name__ == "__main__":

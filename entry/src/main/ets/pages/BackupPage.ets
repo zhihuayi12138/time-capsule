@@ -158,16 +158,13 @@ export struct AboutPage {
             .borderRadius(20)
             .backgroundColor(Color.green)
 
+          // 胶囊用虚线描边，和桌面图标（深绿方块 + 暖白虚线胶囊）保持一致
           Stack({ alignContent: Alignment.Center }) {
             Row()
               .width(26)
               .height(40)
               .borderRadius(13)
-              .border({ width: 2, color: '#FDF6E8' })
-            Row()
-              .width(26)
-              .height(2)
-              .backgroundColor('#FDF6E8')
+              .border({ width: 2, color: '#FDF6E8', style: BorderStyle.Dashed })
           }
           .width(26)
           .height(40)

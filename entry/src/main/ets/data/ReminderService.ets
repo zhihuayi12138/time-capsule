@@ -1,8 +1,13 @@
 import { reminderAgentManager } from '@kit.BackgroundTasksKit';
 import { notificationManager } from '@kit.NotificationKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { Capsule, CapsuleStatus } from '../model/Capsule';
 import { TimeUtil } from '../common/TimeUtil';
 import { AppCtx } from '../common/AppCtx';
+
+const TAG = 'TimeCapsule';
+const DOMAIN = 0x0001;
 
 /**
  * 到期提醒服务。
@@ -15,6 +20,13 @@ import { AppCtx } from '../common/AppCtx';
  * 提醒文案刻意不透露内容：只写"有一个胶囊到时间了"，避免锁屏上泄露。
  */
 export class ReminderService {
+  /**
+   * 上一次排程失败的原因。空串表示上次是成功的。
+   * 排程失败不该静默吞掉 —— 用户「以为设了提醒，其实没设」比"没有提醒"更糟，
+   * 界面要能据此提示"系统提醒没排上，打开应用时仍会标到期"。
+   */
+  static lastError: string = '';
+
   /**
    * 为待开启胶囊排程系统提醒。
    * reminderAgent 只支持未来时间点，所以已到期的不排（改走即时通知）。
@@ -52,8 +64,12 @@ export class ReminderService {
     };
     try {
       const id = await reminderAgentManager.publishReminder(request);
+      ReminderService.lastError = '';
       return id;
     } catch (e) {
+      const err = e as BusinessError;
+      ReminderService.lastError = `publishReminder ${err.code}: ${err.message}`;
+      hilog.error(DOMAIN, TAG, 'publishReminder failed: %{public}d %{public}s', err.code, err.message);
       return undefined;
     }
   }
@@ -99,17 +115,49 @@ export class ReminderService {
     }
   }
 
-  /** 请求通知权限（首次进入时调用） */
+  /**
+   * 请求通知权限。
+   *
+   * requestEnableNotification 在多数情况下只弹一次，用户在弹窗里拒绝过之后
+   * 系统就不再弹了（直接返回成功但实际仍关闭）。所以这里不用它的返回值判断，
+   * 而是弹完再查一次真实状态；仍然是关的就说明用户拒过，
+   * 交给界面引导用户去系统设置里打开（openNotificationSettings）。
+   */
   static async requestPermission(): Promise<boolean> {
     try {
-      const enabled = await notificationManager.isNotificationEnabled();
-      if (enabled) {
+      if (await notificationManager.isNotificationEnabled()) {
         return true;
       }
-      await notificationManager.requestEnableNotification(AppCtx.get());
+      try {
+        await notificationManager.requestEnableNotification(AppCtx.get());
+      } catch (e) {
+        const err = e as BusinessError;
+        hilog.warn(DOMAIN, TAG, 'requestEnableNotification %{public}d: %{public}s', err.code, err.message);
+      }
+      const ok = await notificationManager.isNotificationEnabled();
+      ReminderService.lastError = ok ? '' : '通知未授权';
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** 当前系统是否允许发通知（开应用、从设置页回来时都查一次） */
+  static async isGranted(): Promise<boolean> {
+    try {
       return await notificationManager.isNotificationEnabled();
     } catch (e) {
       return false;
+    }
+  }
+
+  /** 打开系统的通知设置页，用于用户拒绝过之后重新授权 */
+  static async openSettings(): Promise<void> {
+    try {
+      await notificationManager.openNotificationSettings(AppCtx.get());
+    } catch (e) {
+      const err = e as BusinessError;
+      hilog.error(DOMAIN, TAG, 'openNotificationSettings %{public}d: %{public}s', err.code, err.message);
     }
   }
 

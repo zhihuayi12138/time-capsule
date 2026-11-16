@@ -29,6 +29,14 @@ struct Index {
   @State capsules: Capsule[] = [];
   @State current: Capsule = Index.emptyCapsule();
   @State notifyEnabled: boolean = true;
+  /** 系统层面是否真的允许通知；与 notifyEnabled（用户意愿）分开判断 */
+  @State notifyGranted: boolean = false;
+  /**
+   * 上一次给胶囊排系统提醒时的失败原因，空串表示没出问题。
+   * 和 notifyGranted 分开看：通知权限开着，系统也照样可能拒绝排程
+   * （云能力校验、未签名安装包等），这种情况界面必须说实话。
+   */
+  @State scheduleFail: string = '';
   @State lastBackupAt: number = 0;
   @State showSealSheet: boolean = false;
   @State activeTab: number = 0;
@@ -38,8 +46,15 @@ struct Index {
   @State toast: string = '';
   /** 当前时间，每 30 秒推一次；子组件的到期判定都读它 */
   @State nowMs: number = Date.now();
+  /** 每次要让胶囊架回到「待开启」就把它加一（封存完成、恢复备份后） */
+  @State homeResetToken: number = 0;
 
   private stack: NavPathStack = new NavPathStack();
+  /**
+   * Tabs 的 index 属性只在首次构建时生效，之后再改 activeTab 不会真的切页。
+   * 封存后要主动回到胶囊架，必须走 TabsController。
+   */
+  private tabsCtl: TabsController = new TabsController();
   /** 每 30 秒触发一次重算，让倒计时与到期态自然翻页 */
   private tick: number = -1;
 
@@ -85,17 +100,23 @@ struct Index {
       // 启动时给还没排过提醒的胶囊补上系统提醒
       if (this.notifyEnabled) {
         await this.ensureNotifyPermission();
+        await this.refreshNotifyGranted();
         const synced = await ReminderService.syncAll(this.capsules);
         this.capsules = synced;
+        this.noteScheduleFail();
       }
       // 到期的补一条前台通知：系统提醒负责"应用不在时"，
       // 这里补的是"应用被打开、发现有胶囊已经过点了"的那一种情况。
+      // 只补一次（notified 标记），否则每次冷启动都重复推同一条。
       if (this.notifyEnabled) {
-        this.capsules
-          .filter((c: Capsule) => c.status === CapsuleStatus.Pending && TimeUtil.isDue(c.openAt))
-          .forEach((c: Capsule) => {
-            ReminderService.notifyNow(c);
-          });
+        const fresh = this.capsules.filter(
+          (c: Capsule) => c.status === CapsuleStatus.Pending && !c.notified && TimeUtil.isDue(c.openAt)
+        );
+        for (const c of fresh) {
+          c.notified = true;
+          await ReminderService.notifyNow(c);
+          await this.persistOne(c);
+        }
       }
     } catch (e) {
       this.capsules = [];
@@ -184,6 +205,7 @@ struct Index {
     if (c.id.length === 0) {
       c.id = `cap_${Date.now()}`;
     }
+    let scheduled = false;
     try {
       await this.persistOne(c);
       if (this.notifyEnabled) {
@@ -191,6 +213,7 @@ struct Index {
         if (rid !== undefined) {
           c.reminderId = rid;
           await this.persistOne(c);
+          scheduled = true;
         }
       }
     } catch (e) {
@@ -199,12 +222,54 @@ struct Index {
     }
     this.showSealSheet = false;
     this.stack.pop();
-    this.activeTab = 0;
-    this.showToast('已经封存，等它到时间');
+    this.goHomeTab();
+    // 系统提醒没排上时不要只说「已经封存」——用户会以为到点一定会收到通知。
+    // 这种情况仍能靠打开应用时的到期标记兜底，所以措辞是「打开时会标成到期」。
+    if (this.notifyEnabled && !scheduled) {
+      this.showToast('已经封存，但系统提醒没排上，打开应用时会标成到期');
+    } else {
+      this.showToast('已经封存，等它到时间');
+    }
   }
 
   private openedCount(): number {
     return this.capsules.filter((c: Capsule) => c.status === CapsuleStatus.Opened).length;
+  }
+
+  /**
+   * 回到「胶囊架」标签页。
+   * 光改 activeTab 不够：Tabs 的 index 只在创建时生效，之后切页必须用 TabsController，
+   * 否则从「我的」进备份页再返回，会停在「我的」而不是回到胶囊架。
+   */
+  private goHomeTab(): void {
+    this.activeTab = 0;
+    this.tabsCtl.changeIndex(0);
+    this.homeResetToken = this.homeResetToken + 1;
+  }
+
+  /**
+   * 编辑器点取消且已经写了内容 → 存成草稿。
+   * 草稿是「写了半篇，还没决定什么时候封」，所以 openAt 保留编辑器里的值，
+   * 之后再点开这张卡会回到编辑器继续写（openCapsule 里已按 Draft 分支处理）。
+   */
+  private async saveDraft(title: string, blocks: ContentBlock[], openAt: number): Promise<void> {
+    const c = this.current;
+    c.title = title.trim().length > 0 ? title : '还没想好名字';
+    c.blocks = blocks;
+    c.openAt = openAt;
+    c.status = CapsuleStatus.Draft;
+    if (c.id.length === 0) {
+      c.id = `cap_${Date.now()}`;
+    }
+    try {
+      await this.persistOne(c);
+    } catch (e) {
+      this.showToast('草稿没存上，请再试一次');
+      return;
+    }
+    this.stack.pop();
+    this.goHomeTab();
+    this.showToast('已经存成草稿');
   }
 
   /**
@@ -232,12 +297,32 @@ struct Index {
     await SettingsRepo.putBool(StoreKey.KEY_NOTIFY_ENABLED, v);
     if (v) {
       const ok = await ReminderService.requestPermission();
+      this.notifyGranted = ok;
       if (ok) {
         const synced = await ReminderService.syncAll(this.capsules);
         this.capsules = synced;
+        this.noteScheduleFail();
       } else {
         this.showToast('没有通知权限，提醒可能不会弹出');
       }
+    }
+  }
+
+  /**
+   * 把 ReminderService 记下的排程失败原因搬到界面上。
+   * 没有待开启的胶囊时不会有失败，所以空串是正常状态。
+   */
+  private noteScheduleFail(): void {
+    this.scheduleFail = ReminderService.lastError;
+  }
+
+  /** 重新读一次系统通知授权状态（从设置页返回后调用） */
+  private async refreshNotifyGranted(): Promise<void> {
+    this.notifyGranted = await ReminderService.isGranted();
+    if (this.notifyGranted && this.notifyEnabled) {
+      const synced = await ReminderService.syncAll(this.capsules);
+      this.capsules = synced;
+      this.noteScheduleFail();
     }
   }
 
@@ -284,16 +369,17 @@ struct Index {
   tabItem(index: number, label: string) {
     Column() {
       if (index === 0) {
+        // 实心胶囊 + 一道底色中缝，跟应用图标同一套语汇
         Stack() {
           Row()
             .width(15)
             .height(20)
             .borderRadius(7.5)
-            .border({ width: 1.6, color: this.activeTab === index ? Color.green : Color.muted2 })
+            .backgroundColor(this.activeTab === index ? Color.green : Color.muted2)
           Row()
             .width(15)
-            .height(1.6)
-            .backgroundColor(this.activeTab === index ? Color.green : Color.muted2)
+            .height(2)
+            .backgroundColor(Color.bg)
         }
         .width(22)
         .height(22)
@@ -410,6 +496,9 @@ struct Index {
           onCancel: () => {
             this.stack.pop();
           },
+          onSaveDraft: (title: string, blocks: ContentBlock[], openAt: number) => {
+            this.saveDraft(title, blocks, openAt);
+          },
           onRequestSeal: (title: string, blocks: ContentBlock[], openAt: number) => {
             // 编辑器把当前值回传，这里一次性写进待封存草稿，避免读到过期的 this.current
             const c = this.current;
@@ -473,11 +562,12 @@ struct Index {
   build() {
     Stack() {
       Navigation(this.stack) {
-        Tabs({ barPosition: BarPosition.End, index: this.activeTab }) {
+        Tabs({ barPosition: BarPosition.End, index: this.activeTab, controller: this.tabsCtl }) {
           TabContent() {
             HomePage({
               capsules: this.capsules,
               nowMs: this.nowMs,
+              resetToken: this.homeResetToken,
               onNewCapsule: () => this.startNew(),
               onOpenCapsule: (c: Capsule) => {
                 this.openCapsule(c);
@@ -490,12 +580,17 @@ struct Index {
             MinePage({
               notifyEnabled: this.notifyEnabled,
               lastBackupAt: this.lastBackupAt,
+              notifyGranted: this.notifyGranted,
+              scheduleFail: this.scheduleFail,
               onOpenBackup: () => this.openBackup(),
               onOpenAbout: () => {
                 this.stack.pushPathByName(Routes.ABOUT, null);
               },
               onNotifyToggle: (v: boolean) => {
                 this.onNotifyToggle(v);
+              },
+              onOpenNotifySettings: () => {
+                ReminderService.openSettings().then(() => this.refreshNotifyGranted());
               }
             })
           }
