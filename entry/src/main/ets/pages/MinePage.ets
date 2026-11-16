@@ -21,10 +21,25 @@ export struct MinePage {
    * 否则「我明明开了提醒」和「怎么没响」之间会出现无法解释的落差。
    */
   @Prop scheduleFail: string = '';
+  /**
+   * 提醒时间的时分（24 小时制）。
+   * 之前这一行是硬编码「当天 09:00」+ 空回调，等于摆了一个改不动的设置项，
+   * 用户点上去没有任何反应。现在由根页面持有，点开弹时间选择器。
+   */
+  @Prop remindHour: number = 9;
+  @Prop remindMinute: number = 0;
   onOpenBackup: () => void = () => {};
   onOpenAbout: () => void = () => {};
   onNotifyToggle: (v: boolean) => void = () => {};
   onOpenNotifySettings: () => void = () => {};
+  onPickRemindTime: () => void = () => {};
+
+  /** 09:00 形式，分钟补零 */
+  private remindLabel(): string {
+    const mm = this.remindMinute < 10 ? `0${this.remindMinute}` : `${this.remindMinute}`;
+    const hh = this.remindHour < 10 ? `0${this.remindHour}` : `${this.remindHour}`;
+    return `当天 ${hh}:${mm}`;
+  }
 
   @Builder
   groupTitle(text: string) {
@@ -143,7 +158,23 @@ export struct MinePage {
               this.scheduleWarnRow()
             }
             Divider().color(Color.line).strokeWidth(1).margin({ left: 16 })
-            this.rowArrow('提醒时间', '当天 09:00', () => {})
+            // 提醒时间直接内联而不是走 rowArrow(@Builder)：
+            // @Builder 的参数是值传递，改时分不会重绘，文案会停在旧值上。
+            Row() {
+              Text('提醒时间').fontSize(Font.body).fontColor(Color.ink)
+              Blank()
+              Text(this.remindLabel())
+                .fontSize(Font.caption)
+                .fontColor(Color.green)
+                .fontWeight(FontWeight.Medium)
+                .margin({ right: 4 })
+              Text('›').fontSize(18).fontColor(Color.muted2)
+            }
+            .width('100%')
+            .height(52)
+            .padding({ left: 16, right: 16 })
+            .backgroundColor(Color.card)
+            .onClick(() => this.onPickRemindTime())
           }
           .borderRadius(Size.radiusCard)
           .clip(true)

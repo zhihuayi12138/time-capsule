@@ -37,6 +37,9 @@ struct Index {
    * （云能力校验、未签名安装包等），这种情况界面必须说实话。
    */
   @State scheduleFail: string = '';
+  /** 提醒时刻（24 小时制），持久化在 preferences 里 */
+  @State remindHour: number = 9;
+  @State remindMinute: number = 0;
   @State lastBackupAt: number = 0;
   @State showSealSheet: boolean = false;
   @State activeTab: number = 0;
@@ -97,6 +100,10 @@ struct Index {
       this.capsules = list;
       this.notifyEnabled = await SettingsRepo.getBool(StoreKey.KEY_NOTIFY_ENABLED, true);
       this.lastBackupAt = await SettingsRepo.getNumber(StoreKey.KEY_LAST_BACKUP, 0);
+      this.remindHour = await SettingsRepo.getNumber(StoreKey.KEY_REMIND_HOUR, 9);
+      this.remindMinute = await SettingsRepo.getNumber(StoreKey.KEY_REMIND_MINUTE, 0);
+      ReminderService.remindHour = this.remindHour;
+      ReminderService.remindMinute = this.remindMinute;
       // 启动时给还没排过提醒的胶囊补上系统提醒
       if (this.notifyEnabled) {
         await this.ensureNotifyPermission();
@@ -324,6 +331,45 @@ struct Index {
       this.capsules = synced;
       this.noteScheduleFail();
     }
+  }
+
+  /**
+   * 选择提醒时刻。改完要重新排一遍：
+   * 已经排过的提醒还停在旧的时分上，不重排就等于设置没生效。
+   */
+  private pickRemindTime(): void {
+    const selected = new Date();
+    selected.setHours(this.remindHour, this.remindMinute, 0, 0);
+    this.getUIContext().showTimePickerDialog({
+      selected: selected,
+      useMilitaryTime: true,
+      onAccept: (value: TimePickerResult) => {
+        const hh = value.hour === undefined ? 9 : value.hour;
+        const mm = value.minute === undefined ? 0 : value.minute;
+        this.applyRemindTime(hh, mm);
+      }
+    });
+  }
+
+  private async applyRemindTime(hh: number, mm: number): Promise<void> {
+    this.remindHour = hh;
+    this.remindMinute = mm;
+    await SettingsRepo.putNumber(StoreKey.KEY_REMIND_HOUR, hh);
+    await SettingsRepo.putNumber(StoreKey.KEY_REMIND_MINUTE, mm);
+    ReminderService.remindHour = hh;
+    ReminderService.remindMinute = mm;
+    // 旧提醒按旧时分排的，先全部撤掉再按新时刻重排
+    for (const c of this.capsules) {
+      if (c.status === CapsuleStatus.Pending && c.reminderId !== undefined) {
+        await ReminderService.cancel(c.reminderId);
+        c.reminderId = undefined;
+      }
+    }
+    const synced = await ReminderService.syncAll(this.capsules);
+    this.capsules = synced.slice();
+    this.noteScheduleFail();
+    const label = `${hh < 10 ? '0' + hh : hh}:${mm < 10 ? '0' + mm : mm}`;
+    this.showToast(`提醒时间改成 ${label}`);
   }
 
   private async onExport(): Promise<void> {
@@ -582,6 +628,8 @@ struct Index {
               lastBackupAt: this.lastBackupAt,
               notifyGranted: this.notifyGranted,
               scheduleFail: this.scheduleFail,
+              remindHour: this.remindHour,
+              remindMinute: this.remindMinute,
               onOpenBackup: () => this.openBackup(),
               onOpenAbout: () => {
                 this.stack.pushPathByName(Routes.ABOUT, null);
@@ -591,6 +639,9 @@ struct Index {
               },
               onOpenNotifySettings: () => {
                 ReminderService.openSettings().then(() => this.refreshNotifyGranted());
+              },
+              onPickRemindTime: () => {
+                this.pickRemindTime();
               }
             })
           }

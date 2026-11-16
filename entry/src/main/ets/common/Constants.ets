@@ -15,6 +15,9 @@ export class StoreKey {
   static readonly KEY_NOTIFY_ENABLED: string = 'notify_enabled';
   static readonly KEY_NOTIFY_GUIDED: string = 'notify_guided';
   static readonly KEY_LAST_BACKUP: string = 'last_backup_at';
+  /** 到期当天的提醒钟点（时 / 分），默认 09:00 */
+  static readonly KEY_REMIND_HOUR: string = 'remind_hour';
+  static readonly KEY_REMIND_MINUTE: string = 'remind_minute';
 }
 
 export class NotifyId {

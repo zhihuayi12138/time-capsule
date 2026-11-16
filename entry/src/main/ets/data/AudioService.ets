@@ -1,7 +1,12 @@
 import { media } from '@kit.MediaKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppCtx } from '../common/AppCtx';
 import { MediaRepo } from './MediaRepo';
+
+const DOMAIN: number = 0x0001;
+const TAG: string = 'TimeCapsuleAudio';
 
 /**
  * 语音录制与播放。
@@ -12,6 +17,8 @@ import { MediaRepo } from './MediaRepo';
  * 录音文件直接录到应用沙箱，不经过相册/文件 picker，避免额外权限。
  */
 export class AudioService {
+  /** 最近一次失败原因，空串表示成功 */
+  static lastError: string = '';
   private static recorder?: media.AVRecorder = undefined;
   private static player?: media.AVPlayer = undefined;
   private static recording: boolean = false;
@@ -38,25 +45,52 @@ export class AudioService {
     // AVRecorder 的 url 只接受 fd://<fd号>，所以先创建文件拿到 fd
     const file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
 
-    const recorder = await media.createAVRecorder();
-    const config: media.AVRecorderConfig = {
-      audioSourceType: media.AudioSourceType.AUDIO_SOURCE_TYPE_MIC,
-      profile: {
-        audioBitrate: 48000,
-        audioChannels: 1,
-        audioCodec: media.CodecMimeType.AUDIO_AAC,
-        audioSampleRate: 44100,
-        fileFormat: media.ContainerFormatType.CFT_MPEG_4A
-      },
-      url: `fd://${file.fd}`
-    };
-    await recorder.prepare(config);
-    await recorder.start();
+    // createAVRecorder / prepare / start 任一步失败都必须把 fd 和文件收掉。
+    // 以前没有 try/catch：一旦 prepare 抛错，fd 泄漏、文件残留 0 字节，
+    // 而 recorder 字段还是 undefined，于是后续 stop() 直接返回空结果，
+    // 界面上表现为「点了录音没反应」。
+    let recorder: media.AVRecorder | undefined = undefined;
+    try {
+      recorder = await media.createAVRecorder();
+      const config: media.AVRecorderConfig = {
+        audioSourceType: media.AudioSourceType.AUDIO_SOURCE_TYPE_MIC,
+        profile: {
+          audioBitrate: 48000,
+          audioChannels: 1,
+          audioCodec: media.CodecMimeType.AUDIO_AAC,
+          audioSampleRate: 44100,
+          fileFormat: media.ContainerFormatType.CFT_MPEG_4A
+        },
+        url: `fd://${file.fd}`
+      };
+      await recorder.prepare(config);
+      await recorder.start();
+    } catch (e) {
+      const err = e as BusinessError;
+      AudioService.lastError = `录音启动失败 ${err.code === undefined ? '' : err.code}: ${err.message}`;
+      hilog.error(DOMAIN, TAG, 'audio start failed: %{public}s', AudioService.lastError);
+      if (recorder !== undefined) {
+        try {
+          await recorder.release();
+        } catch (e2) {
+          // 忽略
+        }
+      }
+      try {
+        fs.closeSync(file);
+      } catch (e2) {
+        // 忽略
+      }
+      MediaRepo.removeQuietly(path);
+      throw e as Error;
+    }
+
     AudioService.recorder = recorder;
     AudioService.recordFile = file;
     AudioService.recording = true;
     AudioService.recordStartAt = Date.now();
     AudioService.currentPath = path;
+    AudioService.lastError = '';
     return path;
   }
 

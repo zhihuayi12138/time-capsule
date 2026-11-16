@@ -28,6 +28,16 @@ export struct EditorPage {
   @State recordSecs: number = 0;
   /** 正在播放的块 id，空串表示没在播 */
   @State playingId: string = '';
+  /**
+   * 正在录音的块 id。
+   * 之前点「+ 语音」每次都用 `blk_${Date.now()}` 现场生成 id，
+   * 于是「开始」和「停止」两次点击拿到的是两个不同的 id，
+   * 停下来的音频被写进一个不存在的块，界面上就像按了没反应。
+   * 一次录音期间必须复用同一个 id。
+   */
+  @State audioBlockId: string = '';
+  /** 录音失败/权限被拒时的提示，空串表示没有 */
+  @State recordHint: string = '';
   onCancel: () => void = () => {};
   /**
    * 点取消时，如果已经写了东西，交给外层存成草稿。
@@ -171,27 +181,34 @@ export struct EditorPage {
   /** 语音块：点一次开始录，再点一次停止 */
   private async toggleRecord(blockId: string): Promise<void> {
     if (this.recording) {
+      // 停止时一律用 audioBlockId，不信调用方传来的 id
+      const target = this.audioBlockId;
       const result = await AudioService.stop();
       this.stopTimer();
       this.recording = false;
       this.recordSecs = 0;
-      if (result.path.length === 0) {
+      this.audioBlockId = '';
+      if (result.path.length === 0 || target.length === 0) {
+        this.recordHint = '这次没录到声音，再试一次';
         return;
       }
-      this.patchBlock(blockId, (b: ContentBlock) => {
+      this.patchBlock(target, (b: ContentBlock) => {
         b.audioUri = result.path;
         b.duration = result.duration;
       });
+      this.recordHint = '';
       return;
     }
     const granted = await PermService.ensureMicrophone();
     if (!granted) {
+      this.recordHint = '没有麦克风权限，去设置里打开后再试';
       return;
     }
+    const target = blockId.length > 0 ? blockId : `blk_${Date.now()}_${this.blocks.length}`;
     // 语音块先占位进列表，录完再写 uri
-    if (this.blocks.findIndex((b: ContentBlock) => b.id === blockId) < 0) {
+    if (this.blocks.findIndex((b: ContentBlock) => b.id === target) < 0) {
       const block: ContentBlock = {
-        id: blockId,
+        id: target,
         type: BlockType.Audio,
         order: this.blocks.length
       };
@@ -199,11 +216,17 @@ export struct EditorPage {
     }
     try {
       await AudioService.start();
+      this.audioBlockId = target;
       this.recording = true;
       this.recordSecs = 0;
+      this.recordHint = '';
       this.startTimer();
     } catch (e) {
+      // 以前这里把异常吞掉，用户只看到「按了没反应」。
+      // 模拟器没有音频输入设备时 prepare 就会失败，必须说清楚。
       this.recording = false;
+      this.audioBlockId = '';
+      this.recordHint = '这台设备没能打开麦克风，录音不可用';
     }
   }
 
@@ -324,10 +347,21 @@ export struct EditorPage {
           Row() {
             this.addButton('+ 文字', () => this.addText())
             this.addButton('+ 图片', () => { this.addImages(); })
-            this.addButton('+ 语音', () => { this.toggleRecord(`blk_${Date.now()}`); })
+            // 录音中同一个按钮变「停止录音」，并复用 audioBlockId
+            this.addButton(this.recording ? '■ 停止录音' : '+ 语音', () => {
+              this.toggleRecord(this.recording ? this.audioBlockId : `blk_${Date.now()}_${this.blocks.length}`);
+            })
           }
           .width('100%')
-          .margin({ top: 8, bottom: 24 })
+          .margin({ top: 8, bottom: this.recordHint.length > 0 ? 6 : 24 })
+
+          if (this.recordHint.length > 0) {
+            Text(this.recordHint)
+              .fontSize(Font.caption)
+              .fontColor(Color.warmInk)
+              .width('100%')
+              .margin({ bottom: 24 })
+          }
         }
         .alignItems(HorizontalAlign.Start)
         .padding({ left: Size.pageH, right: Size.pageH, top: 8 })
@@ -354,14 +388,16 @@ export struct EditorPage {
   blockView(block: ContentBlock) {
     Column() {
       if (block.type === BlockType.Text) {
+        // 不设 lineHeight、不复位 padding：
+        // 之前 .lineHeight(24) + .padding(0) 会把首行基线顶到卡片上沿，
+        // 占位文案的上升部直接被裁掉（用户反馈「提示字被遮挡」）。
         TextArea({ text: block.text === undefined ? '' : block.text, placeholder: '写下此刻想说的话…' })
           .fontSize(Font.body)
           .fontColor(Color.ink)
           .placeholderColor(Color.muted2)
-          .lineHeight(24)
           .backgroundColor('#00000000')
-          .padding(0)
-          .constraintSize({ minHeight: 44 })
+          .padding({ top: 6, bottom: 6, left: 0, right: 0 })
+          .constraintSize({ minHeight: 60 })
           .width('100%')
           .onChange((v: string) => {
             this.patchBlock(block.id, (b: ContentBlock) => {

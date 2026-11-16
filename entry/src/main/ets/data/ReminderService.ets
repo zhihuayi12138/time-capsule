@@ -26,6 +26,27 @@ export class ReminderService {
    * 界面要能据此提示"系统提醒没排上，打开应用时仍会标到期"。
    */
   static lastError: string = '';
+  /**
+   * 提醒时间（24 小时制），由「我的 → 提醒时间」写入。
+   * 之前这里直接用 openAt 的时分，等于用户没法选择什么时候被提醒；
+   * 现在按设置里定的时刻提醒，但仍然保证不早于胶囊可打开的时间。
+   */
+  static remindHour: number = 9;
+  static remindMinute: number = 0;
+
+  /**
+   * 算出这条胶囊实际该在什么时候提醒。
+   *
+   * 规则：取「开启那天的 remindHour:remindMinute」；
+   * 若那一刻早于 openAt（例如 15:00 开启、提醒设在 09:00），
+   * 就退回到 openAt 本身 —— 提前提醒一个还打不开的胶囊是噪音。
+   */
+  static fireAt(openAt: number): number {
+    const d = new Date(openAt);
+    const at = new Date(d.getFullYear(), d.getMonth(), d.getDate(),
+      ReminderService.remindHour, ReminderService.remindMinute, 0, 0).getTime();
+    return at < openAt ? openAt : at;
+  }
 
   /**
    * 为待开启胶囊排程系统提醒。
@@ -36,7 +57,7 @@ export class ReminderService {
     if (c.status !== CapsuleStatus.Pending) {
       return undefined;
     }
-    const at = c.openAt;
+    const at = ReminderService.fireAt(c.openAt);
     if (at <= Date.now() + 60 * 1000) {
       // 一分钟内到期的不排程，直接靠前台刷新
       return undefined;
@@ -196,7 +217,11 @@ export class ReminderService {
   /** 供 UI 展示的提醒描述（与「我的」页一致） */
   static describe(c: Capsule): string {
     if (c.status === CapsuleStatus.Pending) {
-      return `到期当天 ${TimeUtil.formatClock(c.openAt)} 提醒`;
+      const f = ReminderService.fireAt(c.openAt);
+      const early = f > c.openAt;
+      const hh = ReminderService.remindHour < 10 ? `0${ReminderService.remindHour}` : `${ReminderService.remindHour}`;
+      const mm = ReminderService.remindMinute < 10 ? `0${ReminderService.remindMinute}` : `${ReminderService.remindMinute}`;
+      return early ? `到期当天 ${hh}:${mm} 提醒` : `可以打开时提醒（${TimeUtil.formatClock(f)}）`;
     }
     return '不提醒';
   }
