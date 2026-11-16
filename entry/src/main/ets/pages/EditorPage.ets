@@ -577,16 +577,19 @@ export struct EditorPage {
   blockView(block: ContentBlock) {
     Column() {
       if (block.type === BlockType.Text) {
-        // 不设 lineHeight、不复位 padding：
-        // 之前 .lineHeight(24) + .padding(0) 会把首行基线顶到卡片上沿，
-        // 占位文案的上升部直接被裁掉（用户反馈「提示字被遮挡」）。
+        // 行高必须显式给足，且上下各留内边距。
+        // 坑一：.lineHeight(24) + .padding(0) 会把首行基线顶到卡片上沿，占位文案上升部被裁。
+        // 坑二：完全不设 lineHeight 时，ArkUI 用接近字号的行盒，中文字形（em 盒比拉丁字母高）
+        //       的顶横笔仍会被行盒切掉 3px —— 用户反馈的「"写"字还有遮挡」就是这个。
+        // 所以两者都要：lineHeight 给到 24vp（远大于字形高度）+ padding 上下各 8vp。
         TextArea({ text: block.text === undefined ? '' : block.text, placeholder: '写下此刻想说的话…' })
           .fontSize(Font.body)
           .fontColor(Color.ink)
           .placeholderColor(Color.muted2)
           .backgroundColor('#00000000')
-          .padding({ top: 6, bottom: 6, left: 0, right: 0 })
-          .constraintSize({ minHeight: 60 })
+          .lineHeight(24)
+          .padding({ top: 8, bottom: 8, left: 0, right: 0 })
+          .constraintSize({ minHeight: 64 })
           .width('100%')
           .onChange((v: string) => {
             this.patchBlock(block.id, (b: ContentBlock) => {
