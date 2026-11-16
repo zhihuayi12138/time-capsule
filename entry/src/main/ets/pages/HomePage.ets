@@ -10,6 +10,8 @@ import { CapsuleCard } from '../view/CapsuleCard';
 @Component
 export struct HomePage {
   @Link capsules: Capsule[];
+  /** 由根页面每 30 秒推一次，「今天到期」才会在打开着的时候自己翻过来 */
+  @Prop nowMs: number = 0;
   @State tab: CapsuleTab = CapsuleTab.Pending;
   onNewCapsule: () => void = () => {};
   onOpenCapsule: (c: Capsule) => void = () => {};
@@ -39,7 +41,26 @@ export struct HomePage {
 
   private dueCount(): number {
     return this.capsules.filter((c: Capsule) =>
-      c.status === CapsuleStatus.Pending && TimeUtil.isDue(c.openAt)).length;
+      c.status === CapsuleStatus.Pending && TimeUtil.isDue(c.openAt, this.nowMs)).length;
+  }
+
+  /**
+   * 副标题。空列表和「一个约定都没了」要说不同的话：
+   * 后者意味着胶囊都开完了，不该再显示「还没有和未来约定过什么」。
+   */
+  private subtitle(): string {
+    const pending = this.countOf(CapsuleTab.Pending);
+    const due = this.dueCount();
+    if (due > 0) {
+      return `${due} 个约定已经到时间了`;
+    }
+    if (pending > 0) {
+      return `还有 ${pending} 个约定在时间里等着`;
+    }
+    if (this.countOf(CapsuleTab.Opened) > 0) {
+      return '打开的都在下面，要不要再写一封';
+    }
+    return '还没有和未来约定过什么';
   }
 
   @Builder
@@ -108,9 +129,7 @@ export struct HomePage {
           .fontColor(Color.ink)
           .width('100%')
 
-        Text(this.capsules.length === 0
-          ? '还没有和未来约定过什么'
-          : `还有 ${this.countOf(CapsuleTab.Pending)} 个约定在时间里等着`)
+        Text(this.subtitle())
           .fontSize(Font.caption)
           .fontColor(Color.muted)
           .margin({ top: 6 })
@@ -137,6 +156,7 @@ export struct HomePage {
             ListItem() {
               CapsuleCard({
                 capsule: item,
+                nowMs: this.nowMs,
                 onOpen: (c: Capsule) => this.onOpenCapsule(c)
               })
             }

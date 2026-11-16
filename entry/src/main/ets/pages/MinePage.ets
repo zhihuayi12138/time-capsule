@@ -7,7 +7,8 @@ import { Color, Font, Size } from '../common/Tokens';
 @Component
 export struct MinePage {
   @Link notifyEnabled: boolean;
-  lastBackupAt: number = 0;
+  /** @Prop：备份完成后根页面会改这个值，普通成员不会触发重绘 */
+  @Prop lastBackupAt: number = 0;
   onOpenBackup: () => void = () => {};
   onOpenAbout: () => void = () => {};
   onNotifyToggle: (v: boolean) => void = () => {};

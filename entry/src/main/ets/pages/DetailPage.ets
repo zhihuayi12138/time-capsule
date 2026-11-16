@@ -2,6 +2,8 @@ import { Color, Font, Size } from '../common/Tokens';
 import { BlockType, Capsule, CapsuleStatus, ContentBlock } from '../model/Capsule';
 import { TimeUtil } from '../common/TimeUtil';
 import { NavBar } from '../view/CommonViews';
+import { AudioService } from '../data/AudioService';
+import { MediaRepo } from '../data/MediaRepo';
 
 /**
  * 胶囊详情 · 两状态
@@ -11,7 +13,15 @@ import { NavBar } from '../view/CommonViews';
 @Component
 export struct DetailPage {
   @Link capsule: Capsule;
+  /** 正在播放的块 id，空串表示没在播 */
+  @State playingId: string = '';
   onBack: () => void = () => {};
+  /** 用户确认删除胶囊（只有已开启的才能删，封存中的不给删） */
+  onDelete: () => void = () => {};
+
+  aboutToDisappear(): void {
+    AudioService.stopPlay();
+  }
 
   private isSealed(): boolean {
     return this.capsule.status === CapsuleStatus.Pending && !TimeUtil.isDue(this.capsule.openAt);
@@ -24,6 +34,37 @@ export struct DetailPage {
       return 100;
     }
     return Math.round(Math.min(1, Math.max(0, (Date.now() - this.capsule.createdAt) / total)) * 100);
+  }
+
+  private async playBlock(block: ContentBlock): Promise<void> {
+    if (this.playingId === block.id) {
+      await AudioService.stopPlay();
+      this.playingId = '';
+      return;
+    }
+    if (block.audioUri === undefined || block.audioUri.length === 0) {
+      return;
+    }
+    this.playingId = block.id;
+    await AudioService.play(block.audioUri, () => {
+      this.playingId = '';
+    });
+  }
+
+  private confirmDelete(): void {
+    this.getUIContext().showAlertDialog({
+      title: '删除这个胶囊',
+      message: '删除后内容不会再有，也没有办法找回。',
+      primaryButton: {
+        value: '取消',
+        action: () => {}
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: Color.warmInk,
+        action: () => this.onDelete()
+      }
+    });
   }
 
   @Builder
@@ -129,18 +170,24 @@ export struct DetailPage {
             .width('100%')
             .margin({ bottom: 16 })
         } else if (block.type === BlockType.Image) {
-          Row() {
+          // 多图一行两张，超出换行
+          Flex({ wrap: FlexWrap.Wrap }) {
             if (block.uris !== undefined) {
               ForEach(block.uris!, (uri: string) => {
-                Row().width(140).height(140).backgroundColor(Color.line).borderRadius(12).margin({ right: 8 })
+                Image(MediaRepo.toDisplayUri(uri))
+                  .width(block.uris!.length === 1 ? '100%' : 140)
+                  .height(block.uris!.length === 1 ? 220 : 140)
+                  .objectFit(ImageFit.Cover)
+                  .borderRadius(12)
+                  .margin({ right: 8, bottom: 8 })
               }, (uri: string) => uri)
             }
           }
           .width('100%')
-          .margin({ bottom: 16 })
+          .margin({ bottom: 8 })
         } else {
           Row() {
-            Text('▶')
+            Text(this.playingId === block.id ? '❚❚' : '▶')
               .fontSize(12)
               .fontColor(Color.green)
               .width(32)
@@ -148,12 +195,21 @@ export struct DetailPage {
               .textAlign(TextAlign.Center)
               .backgroundColor(Color.greenSoft)
               .borderRadius(16)
-            Row().width(120).height(3).backgroundColor(Color.green).borderRadius(2).margin({ left: 12 })
-            Text(block.duration === undefined ? '0:00' : `0:${block.duration!}`)
+              .onClick(() => { this.playBlock(block); })
+            Row()
+              .width(this.playingId === block.id ? 160 : 120)
+              .height(3)
+              .backgroundColor(Color.green)
+              .borderRadius(2)
+              .margin({ left: 12 })
+            Text(block.duration === undefined ? '0:00' : TimeUtil.clock(block.duration!))
               .fontSize(Font.tiny)
               .fontColor(Color.muted)
               .margin({ left: 10 })
             Blank()
+            Text(this.playingId === block.id ? '正在播放' : '点击播放')
+              .fontSize(Font.tiny)
+              .fontColor(Color.muted2)
           }
           .width('100%')
           .height(56)
@@ -179,7 +235,9 @@ export struct DetailPage {
       NavBar({
         title: '',
         leftText: '返回',
-        onLeft: () => this.onBack()
+        onLeft: () => this.onBack(),
+        rightText: this.capsule.status === CapsuleStatus.Opened ? '删除' : '',
+        onRight: () => this.confirmDelete()
       })
 
       Scroll() {

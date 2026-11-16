@@ -11,6 +11,30 @@
     {
       "name": "EntryAbility_label",
       "value": "时间胶囊"
+    },
+    {
+      "name": "reason_microphone",
+      "value": "用于录一段语音，封进胶囊里"
+    },
+    {
+      "name": "reason_reminder",
+      "value": "用于在胶囊到期时准时提醒你"
+    },
+    {
+      "name": "CapsuleCard_display_name",
+      "value": "时间胶囊"
+    },
+    {
+      "name": "CapsuleCard_desc",
+      "value": "看一眼还有多久开启"
+    },
+    {
+      "name": "CapsuleCardAbility_label",
+      "value": "时间胶囊卡片"
+    },
+    {
+      "name": "CapsuleCardAbility_desc",
+      "value": "把最近的约定摆在桌面上"
     }
   ]
 }

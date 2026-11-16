@@ -1,34 +1,55 @@
 import { Color, Font, Size } from '../common/Tokens';
 import { NavBar, PrimaryButton } from '../view/CommonViews';
+import { TimeUtil } from '../common/TimeUtil';
+
+/**
+ * 统计单格。
+ * 用独立组件而不是 @Builder：@Builder 的参数是值传递，父页面数据变了不会重建，
+ * 恢复备份后三栏还停在 0（实测踩过）。@Prop 才会跟着刷新。
+ */
+@Component
+struct StatCell {
+  @Prop value: string = '';
+  @Prop label: string = '';
+
+  build() {
+    Column() {
+      Text(this.value)
+        .fontSize(24)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.ink)
+      Text(this.label)
+        .fontSize(Font.tiny)
+        .fontColor(Color.muted)
+        .margin({ top: 4 })
+    }
+    .layoutWeight(1)
+  }
+}
 
 /** 备份与导出：统计三栏 + 两个操作 + 上次备份时间 */
 @Component
 export struct BackupPage {
-  total: number = 0;
-  opened: number = 0;
+  /** 三个统计都必须是 @Prop：恢复备份后根页面会改胶囊列表，普通成员不会重算 */
+  @Prop total: number = 0;
+  @Prop opened: number = 0;
   /** 字节 */
-  bytes: number = 0;
-  lastBackupAt: number = 0;
+  @Prop bytes: number = 0;
+  @Prop lastBackupAt: number = 0;
   onBack: () => void = () => {};
+  onExport: () => void = () => {};
+  onImport: () => void = () => {};
 
   private mb(): string {
     const v = this.bytes / (1024 * 1024);
     return v.toFixed(1);
   }
 
-  @Builder
-  stat(value: string, label: string) {
-    Column() {
-      Text(value)
-        .fontSize(24)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(Color.ink)
-      Text(label)
-        .fontSize(Font.tiny)
-        .fontColor(Color.muted)
-        .margin({ top: 4 })
+  private lastBackupText(): string {
+    if (this.lastBackupAt <= 0) {
+      return '还没有备份过';
     }
-    .layoutWeight(1)
+    return TimeUtil.format(this.lastBackupAt);
   }
 
   @Builder
@@ -54,9 +75,9 @@ export struct BackupPage {
         Column() {
           // 统计
           Row() {
-            this.stat(`${this.total}`, '胶囊总数')
-            this.stat(`${this.opened}`, '已开启')
-            this.stat(this.mb(), 'MB')
+            StatCell({ value: `${this.total}`, label: '胶囊总数' })
+            StatCell({ value: `${this.opened}`, label: '已开启' })
+            StatCell({ value: this.mb(), label: 'MB' })
           }
           .width('100%')
           .padding({ top: 20, bottom: 20 })
@@ -66,8 +87,8 @@ export struct BackupPage {
 
           // 两个操作
           Row({ space: 12 }) {
-            this.actionCard('导出备份', '存成文件，换机不丢', () => {})
-            this.actionCard('从备份恢复', '选择之前导出的文件', () => {})
+            this.actionCard('导出备份', '存成文件，换机不丢', () => this.onExport())
+            this.actionCard('从备份恢复', '选择之前导出的文件', () => this.onImport())
           }
           .width('100%')
           .margin({ top: 16 })
@@ -76,7 +97,9 @@ export struct BackupPage {
           Row() {
             Text('上次备份').fontSize(Font.caption).fontColor(Color.muted)
             Blank()
-            Text('还没有备份过').fontSize(Font.caption).fontColor(Color.muted2)
+            Text(this.lastBackupText())
+              .fontSize(Font.caption)
+              .fontColor(this.lastBackupAt > 0 ? Color.ink2 : Color.muted2)
           }
           .width('100%')
           .padding(16)
@@ -107,7 +130,7 @@ export struct BackupPage {
       .scrollBar(BarState.Off)
 
       Column() {
-        PrimaryButton({ label: '立即导出', onTap: () => {} })
+        PrimaryButton({ label: '立即导出', onTap: () => this.onExport() })
       }
       .padding({ left: Size.pageH, right: Size.pageH, bottom: 28 })
     }

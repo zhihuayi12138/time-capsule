@@ -12,6 +12,28 @@
     "deliveryWithInstall": true,
     "installationFree": false,
     "pages": "$profile:main_pages",
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:reason_microphone",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.PUBLISH_AGENT_REMINDER",
+        "reason": "$string:reason_reminder",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      }
+    ],
     "abilities": [
       {
         "name": "EntryAbility",
@@ -44,6 +66,20 @@
           {
             "name": "ohos.extension.backup",
             "resource": "$profile:backup_config"
+          }
+        ]
+      },
+      {
+        "name": "CapsuleCardAbility",
+        "srcEntry": "./ets/form/CapsuleCardAbility.ets",
+        "label": "$string:CapsuleCardAbility_label",
+        "description": "$string:CapsuleCardAbility_desc",
+        "type": "form",
+        "exported": false,
+        "metadata": [
+          {
+            "name": "ohos.extension.form",
+            "resource": "$profile:form_config"
           }
         ]
       }

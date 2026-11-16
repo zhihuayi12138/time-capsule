@@ -47,6 +47,8 @@ export interface Capsule {
   blocks: ContentBlock[];
   /** 是否已经提醒过 */
   notified: boolean;
+  /** 系统提醒 id（reminderAgentManager 分配的），没排程时为空 */
+  reminderId?: number;
 }
 
 /** 首页分组标签 */

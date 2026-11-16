@@ -1,9 +1,9 @@
-# Python 缓存
+# Python 缂撳瓨
 __pycache__/
 *.py[cod]
 *.pyo
 
-# 临时产物
+# 涓存椂浜х墿
 *.tmp
 *.log
 dashtest.png
@@ -11,19 +11,19 @@ crop_*.png
 _preview_*.png
 build_out.txt
 
-# 编辑器 / 系统
+# 缂栬緫鍣?/ 绯荤粺
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# 依赖
+# 渚濊禆
 node_modules/
 .venv/
 venv/
 
-# HarmonyOS 构建产物
+# HarmonyOS 鏋勫缓浜х墿
 /oh_modules
 **/oh_modules
 /local.properties
@@ -40,9 +40,15 @@ venv/
 *.hsp
 *.har
 
-# ģ����������ʱ�ļ�
+# 模拟器调试临时文件
 shot*.jpeg
 layout*.json
 l[0-9]*.json
 emu_out.txt
 emu_err.txt
+emu*_out.txt
+emu*_err.txt
+t*.jpeg
+lg.json
+_bk.zip
+out/

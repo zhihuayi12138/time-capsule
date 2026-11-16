@@ -18,12 +18,19 @@ export struct CapsuleCard {
     blocks: [],
     notified: false
   };
+  /**
+   * 当前时间戳，由列表每 30 秒推一次。
+   * 为什么需要：ForEach 以 id 做 key，胶囊对象没变时子组件不会重建，
+   * 只改 openAt 之外的"现在几点"就永远刷不出来。把时间当成入参才驱动得了。
+   */
+  @Prop nowMs: number = 0;
   /** 卡片进入点击 */
   onOpen: (capsule: Capsule) => void = () => {};
 
   /** 只有当胶囊仍是「待开启」且已到期时，才算真正到期待打开 */
   private isDueNow(): boolean {
-    return this.capsule.status === CapsuleStatus.Pending && TimeUtil.isDue(this.capsule.openAt);
+    return this.capsule.status === CapsuleStatus.Pending &&
+      TimeUtil.isDue(this.capsule.openAt, this.nowMs);
   }
 
   private progress(): number {
@@ -31,7 +38,7 @@ export struct CapsuleCard {
     if (total <= 0) {
       return 100;
     }
-    const done = Date.now() - this.capsule.createdAt;
+    const done = this.nowMs - this.capsule.createdAt;
     return Math.round(Math.min(1, Math.max(0, done / total)) * 100);
   }
 
@@ -51,7 +58,7 @@ export struct CapsuleCard {
     if (this.isDuePending()) {
       return '';
     }
-    return `距离开启还有 ${TimeUtil.daysLeft(this.capsule.openAt)} 天`;
+    return TimeUtil.countdown(this.capsule.openAt, this.nowMs);
   }
 
   build() {

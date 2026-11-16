@@ -2,9 +2,17 @@
 
 > 把话锁进时间里。
 
-鸿蒙原生应用「时间胶囊」的产品设计与高保真原型仓库。写完之后**真正封存**，不到约定那一天，连自己都打不开。
+鸿蒙原生应用「时间胶囊」的完整实现与设计仓库。写完之后**真正封存**，不到约定那一天，连自己都打不开。
 
-本仓库当前阶段：**阶段二 静态界面**（页面原型已完成，HarmonyOS 工程骨架已可编译出 HAP，业务逻辑待实现）。
+本仓库当前阶段：**阶段四 已可用**（数据持久化、图片音频、到期提醒、备份导出、桌面卡片全部接通，已在 HarmonyOS 模拟器上端到端跑通）。
+
+功能一览：
+
+- **真封存**：封存后进「封存中」，详情页不存在任何渲染内容的代码分支，界面上没有任何通往内容的路径
+- **三种内容**：文字（直接编辑）、图片（相册多选，复制进沙箱）、语音（AVRecorder 录音，详情页内嵌播放）
+- **到期提醒**：系统级日历提醒 + 打开应用时比对 + 页面停留时每 30 秒翻页，三条腿
+- **备份迁移**：导出 `zip`（`capsules.json` + 媒体文件）到「我的手机」，可从 zip 整库恢复
+- **桌面卡片**：2×2 / 2×4 / 4×4，显示最近的约定与剩余天数，点击直达应用
 
 ---
 
@@ -44,15 +52,21 @@ time-capsule/
 ├── entry/                      entry 模块
 │   └── src/main/
 │       ├── ets/
-│       │   ├── entryability/        EntryAbility.ets
+│       │   ├── entryability/        EntryAbility.ets（初始化全局 context 与数据层）
 │       │   ├── entrybackupability/  EntryBackupAbility.ets
-│       │   ├── common/              Tokens.ets 设计令牌、TimeUtil.ets、Constants.ets
+│       │   ├── common/              Tokens 设计令牌、TimeUtil、Constants、AppCtx
 │       │   ├── model/               Capsule.ets 数据模型与状态枚举
+│       │   ├── data/                CapsuleRepo（RDB 两表）、SettingsRepo（preferences）
+│       │   │                        MediaRepo（图片导入/导出）、AudioService（录音与回放）
+│       │   │                        ReminderService（系统提醒）、BackupService（zip 备份）
+│       │   │                        PermService、CardData、FormRegistry
 │       │   ├── view/                CommonViews.ets（NavBar/PrimaryButton）、CapsuleCard.ets
+│       │   ├── form/                CapsuleCardAbility.ets（FormExtensionAbility）
+│       │   ├── capsule_card/pages/  CapsuleCard.ets（桌面卡片 UI）
 │       │   └── pages/               Index.ets（根 + Navigation + 封存弹层）
 │       │                            HomePage / EditorPage / DetailPage / MinePage / BackupPage
-│       └── resources/           color/string/float 资源 + main_pages + backup_config
-├── build-profile.json5         构建配置（compatibleSdkVersion 26.0.0）
+│       └── resources/           color/string/float 资源 + main_pages + backup_config + form_config
+├── build-profile.json5         构建配置（compatibleSdkVersion 6.1.0(23)）
 ├── hvigor/hvigor-config.json5  modelVersion 26.0.0
 ├── build.cmd                   离线编译入口（已处理 PATH 依赖）
 ├── make_icon.py                图标生成（Pillow）
@@ -89,7 +103,7 @@ time-capsule/
 │   ├─ 待开启 ──进详情──→ 胶囊详情 · 封存中（内容遮蔽）
 │   ├─ 已开启 ──进详情──→ 胶囊详情 · 已开启
 │   └─ 草稿   ──进详情──→ 约定时间（继续编辑）
-├─ 约定时间 ──封存──→ 封存确认（bindSheet）──→ 回到首页
+├─ 约定时间 ──封存──→ 封存确认（底部弹层）──→ 回到首页
 ├─ 我的
 │   ├─ 通知与卡片
 │   ├─ 备份与导出
@@ -168,14 +182,44 @@ python make_index.py              # 生成索引页 index.html
 
 ---
 
-## 技术难点（开发阶段需优先验证）
+## 数据与实现
 
-1. **到期判定准确性** —— 不能只靠"打开 App 时比对时间"，需在启动、回前台、卡片刷新三处统一校准。
-2. **通知送达** —— 单点失败风险。通知权限被拒时，桌面服务卡片是兜底通路（见 09 / 12）。
-3. **"真的打不开"** —— 第一版只做到**界面层不可达**，数据仍在应用沙盒内；加密方案待评估。
-4. **AVPlayer 音频** —— 录音与回放，详情页内嵌进度条不跳页。
-5. **数据模型** —— 胶囊 + 内容块两张表，一对多。
-6. **卡片与主应用同步** —— FormComponent 倒计时需与主应用一致。
+### 存储
+
+两张表，一对多（立项书要求）：
+
+```sql
+capsule(id, title, status, createdAt, openAt, openedAt, notified, reminderId)
+block(id, capsuleId, type, text, uris, audioUri, duration, sortOrder)
+```
+
+`securityLevel: S2`，落在应用沙箱 `rdb/timecapsule.db`。图片与录音**复制进沙箱**（`files/media/`）而不是只存 picker 授权 uri——picker 的授权在清缓存或换设备后会失效，封存五年的胶囊不能冒这个险。
+
+### 到期判定的三条腿
+
+| 场景 | 机制 |
+|---|---|
+| 应用不在前台 | `reminderAgentManager` 日历提醒（系统闹钟级） |
+| 应用被打开 | 启动时比对 `openAt`，到期的立刻转暖色卡并补前台通知 |
+| 应用停在这一页 | 根页面每 30 秒推一次 `nowMs`，卡片与副标题自动翻页 |
+
+三条腿都指向同一个 `TimeUtil`，避免三处各算一套导致显示不一致。
+
+### 备份格式
+
+zip 内含 `capsules.json` + `media/`。`formatVersion: 1`，恢复时**整库替换**，媒体按内容重新落盘并重写 uri。用 `zlib.compressFile / decompressFile`（`zipFile` 已废弃）。
+
+---
+
+## 技术难点（已实测验证）
+
+1. **到期判定准确性** —— 已按上表三条腿实现。注意 `daysLeft` 用向上取整、`daysWaited` 用向下取整，否则「刚封存」会显示「已等待 1 天」。
+2. **通知送达** —— `PUBLISH_AGENT_REMINDER` 是 system_grant，不弹窗；但 reminderAgent 还要求 `reminder_capability` 云能力校验通过 + 应用已签名。
+3. **"真的打不开"** —— 第一版是**界面层不可达**：封存中的胶囊详情不含任何内容渲染分支，数据仍在沙箱内。加密方案待评估。
+4. **AVPlayer / AVRecorder** —— 沙箱内录制必须用 `url: 'fd://' + file.fd`（写路径会失败）；播放用 `fdSrc = {fd, offset, length}`。
+5. **图片显示** —— `Image()` 拿到裸沙箱路径**不报错但空白**，必须补 `file://` scheme（`MediaRepo.toDisplayUri`）。
+6. **卡片与主应用同步** —— `formProvider.updateForm` 推送数据；卡片页必须用 `@LocalStorageProp` 接收，普通 `@State` 收不到。
+7. **ArkUI 刷新模型**（最耗时的一类坑）—— 普通成员、`@Builder` 值参数、`@Link` 的深层数组改动**都不会触发刷新**。需要 `@Prop` 或整体替换数组。
 
 ---
 
@@ -185,10 +229,10 @@ python make_index.py              # 生成索引页 index.html
 |---|---|---|
 | 一 | 立项与设计（需求、竞品、页面结构、原型） | ✅ 已完成 |
 | 二 | 静态界面（工程骨架 + 五页静态布局） | ✅ 已完成 |
-| 三 | 导航与状态（草稿 / 待开启 / 已开启三态打通） | 进行中 |
-| 四 | 数据与业务（RDB 两表、内容块、到期计算） | 待开始 |
-| 五 | 通知、卡片、备份 | 待开始 |
-| 六 | 测试与优化 | 待开始 |
+| 三 | 导航与状态（Tab + Navigation，三态打通） | ✅ 已完成 |
+| 四 | 数据与业务（RDB 两表、内容块、到期计算、图片音频） | ✅ 已完成 |
+| 五 | 通知、卡片、备份 | ✅ 已完成（模拟器已验证，真机签名后需复测提醒） |
+| 六 | 测试与优化 | 进行中 |
 
 ---
 
@@ -196,17 +240,23 @@ python make_index.py              # 生成索引页 index.html
 
 | 页面 | 主要组件 | 实现状态 |
 |---|---|---|
-| 首页胶囊架 | `Tabs` 手写分组标签、`List`、`ForEach`、`@Builder` | ✅ 已实现 |
-| 约定时间 | `TextInput`、`Scroll`、`@Builder`、键盘避让 | ✅ 已实现（图片/音频待接） |
-| 封存确认 | `bindSheet` + 自定义内容 | ✅ 已实现 |
-| 详情 · 封存中 | `Text`、自绘进度条 | ✅ 已实现 |
-| 详情 · 已开启 | `ForEach`、`Image`（占位）、内嵌音频条 | ⚠️ 音频待接 AVPlayer |
+| 首页胶囊架 | `Tabs` 底部导航、手写分组标签、`List`/`ForEach`、`CapsuleCard` | ✅ 接通 RDB |
+| 约定时间 | `TextInput`/`TextArea`、`showDatePickerDialog`/`showTimePickerDialog`、图片块、录音块 | ✅ 全通 |
+| 封存确认 | `Stack` 遮罩 + `TransitionEffect.translate` 底部弹层 | ✅ 已实现（不用 `bindSheet`，见下） |
+| 详情 · 封存中 | 锁形虚线卡 `dashed`、自绘进度条 | ✅ 已实现 |
+| 详情 · 已开启 | `Image` 真实渲染、`AudioService` 内嵌播放、删除入口 | ✅ 已实现 |
 | 我的 | `Toggle`、自定义行 | ✅ 已实现 |
-| 备份与导出 | 统计栏、操作卡 | ✅ 静态 |
-| 桌面卡片 | ArkTS 卡片 + `FormExtensionAbility` | ❌ 未开始 |
+| 备份与导出 | `StatCell` 统计、`DocumentViewPicker` 导出、`DocumentSelectPicker` 恢复 | ✅ 已实现 |
+| 桌面卡片 | `FormExtensionAbility` + ArkTS 卡片 + `formProvider` | ✅ 已实现 |
+| 到期通知 | `reminderAgentManager` + `notificationManager` | ✅ 代码就绪，模拟器受云能力限制 |
 
-**当前为纯静态骨架**：`Index.ets` 里的胶囊列表是空数组，数据层（RDB / Preferences）
-与通知、卡片均未接入。页面间导航与状态流转已打通，可运行查看。
+> **封存弹层的实现选择**：原本用 `bindSheet` 挂在 `Navigation` 上，压栈的 `NavDestination` 会盖住弹层 overlay，点了没反应。改为在根 `Stack` 里手写遮罩 + `TransitionEffect.translate`，行为可控且不依赖导航栈层级。
+
+### 模拟器环境说明
+
+模拟器镜像为 HarmonyOS 6.1.0(23)，因此 `compatibleSdkVersion` 必须写 `"6.1.0(23)"`（写裸 `"23"` 会被 hvigor 拒绝，写 `"26.0.0"` 则装不进设备）；`targetSdkVersion` 保持 `"26.0.0"`。
+
+**已知环境限制**：模拟器上 `reminderAgentManager.publishReminder` 会因 `reminder_capability` 云能力校验失败而拒绝（`VerifyCloudCapability failed`），且未签名 HAP 无证书。这是环境限制而非代码缺陷，真机签名后可用。降级路径是应用打开时比对时间 + 桌面卡片倒计时，两者均已验证正常。
 
 ---
 

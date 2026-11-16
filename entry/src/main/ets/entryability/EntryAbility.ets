@@ -1,6 +1,8 @@
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { AppCtx } from '../common/AppCtx';
+import { CapsuleRepo } from '../data/CapsuleRepo';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'TimeCapsule';
@@ -12,6 +14,14 @@ export default class EntryAbility extends UIAbility {
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'setColorMode failed: %{public}s', JSON.stringify(err));
     }
+    // 数据层与媒体层都依赖 context，必须在这里就把全局上下文交出去，
+    // 否则页面 aboutToAppear 里第一次读库会拿不到 filesDir。
+    AppCtx.set(this.context);
+    CapsuleRepo.init().then(() => {
+      hilog.info(DOMAIN, TAG, 'CapsuleRepo ready');
+    }).catch((err: Error) => {
+      hilog.error(DOMAIN, TAG, 'CapsuleRepo init failed: %{public}s', err.message);
+    });
     hilog.info(DOMAIN, TAG, 'Ability onCreate');
   }
 
