@@ -17,6 +17,8 @@ export class Color {
   static readonly warmLine: string = '#EAD9B4';
   static readonly warmInk: string = '#A8742A';
   static readonly dash: string = '#DCD5C4';
+  /** 空状态手绘图示的描边色（取自 prototypes/02.png 虚线胶囊实测 #C4C0B0） */
+  static readonly sketch: string = '#C4C0B0';
 }
 
 export class Size {

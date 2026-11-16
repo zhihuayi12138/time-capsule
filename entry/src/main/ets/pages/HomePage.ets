@@ -110,12 +110,43 @@ export struct HomePage {
   @Builder
   emptyState() {
     Column() {
-      Column()
-        .width(96)
-        .height(96)
-        .borderRadius(48)
-        .border({ width: 1.5, color: Color.dash, style: BorderStyle.Dashed })
-        .margin({ top: 96 })
+      // 与 prototypes/02.png 对齐：细描边圆环 + 圈内虚线胶囊 + 胶囊里一根时针。
+      // 之前这里只画了一个虚线圆环，与原型不一致（用户指出「圆圈内原型设计时是有图案的吧」）。
+      Stack() {
+        // 外圈：实线细环
+        Circle()
+          .width(86)
+          .height(86)
+          .fillOpacity(0)
+          .stroke(Color.muted2)
+          .strokeWidth(1.4)
+
+        // 圈内竖向虚线胶囊
+        Rect()
+          .width(30)
+          .height(44)
+          .radius(15)
+          .fillOpacity(0)
+          .stroke(Color.sketch)
+          .strokeWidth(1.6)
+          .strokeDashArray([4, 4])
+
+        // 胶囊里的时针：从中心偏左下指向右上，形状是一根折线
+        // 坐标取自 render_proto.py:364-365 的 (cx-7,cy) -> (cx-2.5,cy+4.5) -> (cx+8,cy-5.5)，
+        // 换算到 30x44 的胶囊盒子内就是下面三个点。
+        Polyline()
+          .width(30)
+          .height(44)
+          .points([[8, 22], [12.5, 26.5], [23, 16.5]])
+          .fillOpacity(0)
+          .stroke(Color.sketch)
+          .strokeWidth(1.8)
+          .strokeLineCap(LineCapStyle.Round)
+          .strokeLineJoin(LineJoinStyle.Round)
+      }
+      .width(86)
+      .height(86)
+      .margin({ top: 96 })
 
       Text('时间还没有开始')
         .fontSize(20)
