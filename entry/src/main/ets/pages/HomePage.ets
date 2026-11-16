@@ -148,7 +148,7 @@ export struct HomePage {
         .scrollBar(BarState.Off)
       }
 
-      // 底部通栏新建按钮
+      // 底部通栏新建按钮（底部 Tab 栏已由 Tabs 承担，这里只留 12 的间距）
       Column() {
         Text(this.capsules.length === 0 ? '+ 与时间的第一个约定' : '+ 与时间约定')
           .width('100%')
@@ -161,7 +161,7 @@ export struct HomePage {
           .borderRadius(16)
           .onClick(() => this.onNewCapsule())
       }
-      .padding({ left: Size.pageH, right: Size.pageH, top: 12, bottom: 28 })
+      .padding({ left: Size.pageH, right: Size.pageH, top: 12, bottom: 10 })
     }
     .width('100%')
     .height('100%')

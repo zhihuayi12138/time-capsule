@@ -1,16 +1,13 @@
 import { Color, Font, Size } from '../common/Tokens';
-import { NavBar } from '../view/CommonViews';
 
 /**
- * 我的：三组设置。
- * 提醒（通知开关 / 提醒时间）、数据（备份与导出）、其他（关于）。
- * 开关状态由外层页面持有，这里只负责展示与回调。
+ * 我的（底部 Tab 一级页面）。
+ * 三组设置：提醒、数据、其他。开关状态由根页面持有，这里只展示与回调。
  */
 @Component
 export struct MinePage {
   @Link notifyEnabled: boolean;
   lastBackupAt: number = 0;
-  onBack: () => void = () => {};
   onOpenBackup: () => void = () => {};
   onOpenAbout: () => void = () => {};
   onNotifyToggle: (v: boolean) => void = () => {};
@@ -58,7 +55,22 @@ export struct MinePage {
 
   build() {
     Column() {
-      NavBar({ title: '我的', leftText: '返回', onLeft: () => this.onBack() })
+      // 与胶囊架一致的大标题
+      Column() {
+        Text('我的')
+          .fontSize(Font.display)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.ink)
+          .width('100%')
+
+        Text('设置、备份与关于')
+          .fontSize(Font.caption)
+          .fontColor(Color.muted)
+          .margin({ top: 6 })
+          .width('100%')
+      }
+      .alignItems(HorizontalAlign.Start)
+      .padding({ left: Size.pageH, right: Size.pageH, top: 16, bottom: 4 })
 
       Scroll() {
         Column() {
@@ -71,11 +83,12 @@ export struct MinePage {
           }
           .borderRadius(Size.radiusCard)
           .clip(true)
-
           // 数据
           this.groupTitle('数据')
           Column() {
-            this.rowArrow('备份与导出', this.lastBackupAt > 0 ? '上次备份 3 天前' : '还没备份过', () => this.onOpenBackup())
+            this.rowArrow('备份与导出',
+              this.lastBackupAt > 0 ? '已备份' : '还没备份过',
+              () => this.onOpenBackup())
           }
           .borderRadius(Size.radiusCard)
           .clip(true)
@@ -96,8 +109,10 @@ export struct MinePage {
             .margin({ top: 28, bottom: 24 })
         }
         .padding({ left: Size.pageH, right: Size.pageH })
+        .alignItems(HorizontalAlign.Start)
       }
       .layoutWeight(1)
+      .align(Alignment.Top)
       .scrollBar(BarState.Off)
     }
     .width('100%')

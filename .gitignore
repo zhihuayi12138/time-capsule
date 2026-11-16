@@ -39,3 +39,10 @@ venv/
 *.hap
 *.hsp
 *.har
+
+# 模拟器调试临时文件
+shot*.jpeg
+layout*.json
+l[0-9]*.json
+emu_out.txt
+emu_err.txt

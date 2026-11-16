@@ -11,16 +11,28 @@ import { NavBar, PrimaryButton } from '../view/CommonViews';
 export struct EditorPage {
   /** 传入草稿则进入编辑态 */
   @Link draft: Capsule;
+  /**
+   * 内容块的本地副本。
+   * @Link 只观察顶层重新赋值，直接 push 进 draft.blocks 不会触发刷新，
+   * 所以这里用独立 @State 数组承载渲染，改动后整体替换再回写到 draft。
+   */
+  @State blocks: ContentBlock[] = [];
+  @State title: string = '';
   onCancel: () => void = () => {};
   /** 点击封存 → 由外层弹出封存确认弹层 */
   onRequestSeal: () => void = () => {};
 
+  aboutToAppear(): void {
+    this.title = this.draft.title;
+    this.blocks = this.draft.blocks.slice();
+  }
+
   private canSeal(): boolean {
-    return this.draft.title.trim().length > 0 && this.draft.blocks.length > 0;
+    return this.title.trim().length > 0 && this.blocks.length > 0;
   }
 
   private addBlock(type: BlockType): void {
-    const order = this.draft.blocks.length;
+    const order = this.blocks.length;
     const block: ContentBlock = {
       id: `blk_${Date.now()}_${order}`,
       type: type,
@@ -29,7 +41,9 @@ export struct EditorPage {
     if (type === BlockType.Text) {
       block.text = '';
     }
-    this.draft.blocks.push(block);
+    // 整体替换以触发 @State 刷新，再回写给外层草稿
+    this.blocks = this.blocks.concat([block]);
+    this.draft.blocks = this.blocks;
   }
 
   @Builder
@@ -59,7 +73,7 @@ export struct EditorPage {
       Scroll() {
         Column() {
           // 标题输入
-          TextInput({ text: this.draft.title, placeholder: '给这一刻起个名字' })
+          TextInput({ text: this.title, placeholder: '给这一刻起个名字' })
             .fontSize(22)
             .fontWeight(FontWeight.Medium)
             .fontColor(Color.ink)
@@ -69,6 +83,7 @@ export struct EditorPage {
             .height(56)
             .width('100%')
             .onChange((v: string) => {
+              this.title = v;
               this.draft.title = v;
             })
 
@@ -108,7 +123,7 @@ export struct EditorPage {
           Divider().color(Color.line).strokeWidth(1).margin({ top: 4, bottom: 16 })
 
           // 内容块
-          ForEach(this.draft.blocks, (block: ContentBlock) => {
+          ForEach(this.blocks, (block: ContentBlock) => {
             this.blockView(block)
           }, (block: ContentBlock) => block.id)
 
@@ -125,6 +140,7 @@ export struct EditorPage {
         .padding({ left: Size.pageH, right: Size.pageH, top: 8 })
       }
       .layoutWeight(1)
+      .align(Alignment.Top)
       .scrollBar(BarState.Off)
 
       Column() {

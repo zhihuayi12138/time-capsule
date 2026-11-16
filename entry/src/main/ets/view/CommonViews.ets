@@ -9,7 +9,8 @@ export struct NavBar {
   title: string = '';
   leftText: string = '返回';
   rightText: string = '';
-  rightEnabled: boolean = true;
+  /** 必须是 @Prop：普通成员只在首次创建时取值，父组件状态变化后不会更新 */
+  @Prop rightEnabled: boolean = true;
   showDivider: boolean = true;
   onLeft: () => void = () => {};
   onRight: () => void = () => {};
@@ -22,6 +23,8 @@ export struct NavBar {
           .fontWeight(FontWeight.Medium)
           .fontColor(Color.ink)
 
+        // 左右两块都是 100% 宽，后绘制的会盖住先绘制的命中区域，
+        // 所以必须设 Transparent：自身与子节点可点，但不阻塞下层兄弟节点。
         Row() {
           Text(this.leftText)
             .fontSize(Font.body)
@@ -31,6 +34,7 @@ export struct NavBar {
         .width('100%')
         .justifyContent(FlexAlign.Start)
         .padding({ left: Size.pageH })
+        .hitTestBehavior(HitTestMode.Transparent)
 
         Row() {
           Text(this.rightText)
@@ -46,6 +50,7 @@ export struct NavBar {
         .width('100%')
         .justifyContent(FlexAlign.End)
         .padding({ right: Size.pageH })
+        .hitTestBehavior(HitTestMode.Transparent)
       }
       .width('100%')
       .height(Size.navBar)
@@ -62,8 +67,8 @@ export struct NavBar {
 @Component
 export struct PrimaryButton {
   label: string = '';
-  /** 注意：不能命名为 enabled，会与 CustomComponent 内置属性冲突 */
-  isEnabled: boolean = true;
+  /** 注意：不能命名为 enabled，会与 CustomComponent 内置属性冲突；且必须是 @Prop 才能随父状态刷新 */
+  @Prop isEnabled: boolean = true;
   onTap: () => void = () => {};
 
   build() {

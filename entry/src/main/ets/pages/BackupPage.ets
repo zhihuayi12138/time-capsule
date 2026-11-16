@@ -100,8 +100,10 @@ export struct BackupPage {
           .margin({ top: 16 })
         }
         .padding({ left: Size.pageH, right: Size.pageH, top: 12 })
+        .alignItems(HorizontalAlign.Start)
       }
       .layoutWeight(1)
+      .align(Alignment.Top)
       .scrollBar(BarState.Off)
 
       Column() {
@@ -125,13 +127,31 @@ export struct AboutPage {
       NavBar({ title: '关于', leftText: '返回', onLeft: () => this.onBack() })
 
       Column() {
-        // App 图标
-        Row()
-          .width(76)
-          .height(76)
-          .borderRadius(20)
-          .backgroundColor(Color.green)
-          .margin({ top: 48 })
+        // App 图标：绿色圆角底 + 竖向胶囊 + 中缝
+        Stack({ alignContent: Alignment.Center }) {
+          Row()
+            .width(76)
+            .height(76)
+            .borderRadius(20)
+            .backgroundColor(Color.green)
+
+          Stack({ alignContent: Alignment.Center }) {
+            Row()
+              .width(26)
+              .height(40)
+              .borderRadius(13)
+              .border({ width: 2, color: '#FDF6E8' })
+            Row()
+              .width(26)
+              .height(2)
+              .backgroundColor('#FDF6E8')
+          }
+          .width(26)
+          .height(40)
+        }
+        .width(76)
+        .height(76)
+        .margin({ top: 48 })
 
         Text('时间胶囊')
           .fontSize(20)

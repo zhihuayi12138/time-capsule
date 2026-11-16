@@ -17,12 +17,13 @@ export struct DetailPage {
     return this.capsule.status === CapsuleStatus.Pending && !TimeUtil.isDue(this.capsule.openAt);
   }
 
+  /** 返回 0–100 的整数百分比；0% 时调用方不画填充条 */
   private progress(): number {
     const total = this.capsule.openAt - this.capsule.createdAt;
     if (total <= 0) {
-      return 1;
+      return 100;
     }
-    return Math.min(1, Math.max(0, (Date.now() - this.capsule.createdAt) / total));
+    return Math.round(Math.min(1, Math.max(0, (Date.now() - this.capsule.createdAt) / total)) * 100);
   }
 
   @Builder
@@ -70,7 +71,9 @@ export struct DetailPage {
 
         Stack({ alignContent: Alignment.Start }) {
           Row().width('100%').height(4).backgroundColor(Color.line).borderRadius(2)
-          Row().width(`${this.progress() * 100}%`).height(4).backgroundColor(Color.green).borderRadius(2)
+          if (this.progress() > 0) {
+            Row().width(`${this.progress()}%`).height(4).backgroundColor(Color.green).borderRadius(2)
+          }
         }
         .width('100%')
         .height(4)
@@ -205,6 +208,7 @@ export struct DetailPage {
         .padding({ left: Size.pageH, right: Size.pageH, top: 12, bottom: 40 })
       }
       .layoutWeight(1)
+      .align(Alignment.Top)
       .scrollBar(BarState.Off)
     }
     .width('100%')

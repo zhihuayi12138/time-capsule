@@ -8,7 +8,8 @@ import { TimeUtil } from '../common/TimeUtil';
  */
 @Component
 export struct CapsuleCard {
-  capsule: Capsule = {
+  /** 必须是 @Prop：普通成员只在创建时取值，胶囊状态变化（待开启→已开启）后卡片不会刷新 */
+  @Prop capsule: Capsule = {
     id: '',
     title: '',
     status: CapsuleStatus.Pending,
@@ -20,34 +21,42 @@ export struct CapsuleCard {
   /** 卡片进入点击 */
   onOpen: (capsule: Capsule) => void = () => {};
 
-  private isDue(): boolean {
-    return this.capsule.status === CapsuleStatus.Opened ||
-      TimeUtil.isDue(this.capsule.openAt);
+  /** 只有当胶囊仍是「待开启」且已到期时，才算真正到期待打开 */
+  private isDueNow(): boolean {
+    return this.capsule.status === CapsuleStatus.Pending && TimeUtil.isDue(this.capsule.openAt);
   }
 
   private progress(): number {
     const total = this.capsule.openAt - this.capsule.createdAt;
     if (total <= 0) {
-      return 1;
+      return 100;
     }
     const done = Date.now() - this.capsule.createdAt;
-    return Math.min(1, Math.max(0, done / total));
+    return Math.round(Math.min(1, Math.max(0, done / total)) * 100);
+  }
+
+  private isDuePending(): boolean {
+    return this.isDueNow();
   }
 
   private countdownText(): string {
     if (this.capsule.status === CapsuleStatus.Opened) {
       return `已等待 ${TimeUtil.daysWaited(this.capsule.createdAt, this.capsule.openedAt)} 天`;
     }
-    const left = TimeUtil.daysLeft(this.capsule.openAt);
-    if (left <= 0) {
-      return '今天到期 · 可以打开了';
+    // 草稿还没封存，不显示倒计时
+    if (this.capsule.status === CapsuleStatus.Draft) {
+      return '草稿 · 还没封存';
     }
-    return `距离开启还有 ${left} 天`;
+    // 到期的卡片顶部已有一行暖色提示，这里不再重复
+    if (this.isDuePending()) {
+      return '';
+    }
+    return `距离开启还有 ${TimeUtil.daysLeft(this.capsule.openAt)} 天`;
   }
 
   build() {
     Column() {
-      if (this.isDue() && this.capsule.status === CapsuleStatus.Pending) {
+      if (this.isDueNow()) {
         Row() {
           Circle().width(5).height(5).fill(Color.warmInk)
           Text('今天到期 · 可以打开了')
@@ -67,24 +76,28 @@ export struct CapsuleCard {
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .width('100%')
 
-      Text(this.countdownText())
-        .fontSize(Font.caption)
-        .fontColor(Color.muted)
-        .margin({ top: 6 })
-        .width('100%')
+      if (this.countdownText().length > 0) {
+        Text(this.countdownText())
+          .fontSize(Font.caption)
+          .fontColor(Color.muted)
+          .margin({ top: 6 })
+          .width('100%')
+      }
 
       if (this.capsule.status === CapsuleStatus.Pending) {
-        // 细进度条：已过时间占全程的比例
+        // 细进度条：已过时间占全程的比例（0% 时不画填充，避免退化成整条）
         Stack({ alignContent: Alignment.Start }) {
           Row().width('100%').height(3).backgroundColor(Color.line).borderRadius(2)
-          Row().width(`${this.progress() * 100}%`).height(3).backgroundColor(Color.green).borderRadius(2)
+          if (this.progress() > 0) {
+            Row().width(`${this.progress()}%`).height(3).backgroundColor(Color.green).borderRadius(2)
+          }
         }
         .width('100%')
         .height(3)
         .margin({ top: 12 })
       }
 
-      if (this.isDue() && this.capsule.status === CapsuleStatus.Pending) {
+      if (this.isDueNow()) {
         Text('打开胶囊')
           .height(36)
           .padding({ left: 18, right: 18 })
@@ -101,11 +114,11 @@ export struct CapsuleCard {
     .width('100%')
     .padding(16)
     .alignItems(HorizontalAlign.Start)
-    .backgroundColor(this.isDue() && this.capsule.status === CapsuleStatus.Pending ? Color.warmBg : Color.card)
+    .backgroundColor(this.isDueNow() ? Color.warmBg : Color.card)
     .borderRadius(Size.radiusCard)
     .border({
       width: 1,
-      color: this.isDue() && this.capsule.status === CapsuleStatus.Pending ? Color.warmLine : Color.line
+      color: this.isDueNow() ? Color.warmLine : Color.line
     })
     .onClick(() => this.onOpen(this.capsule))
   }
